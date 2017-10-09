@@ -111,6 +111,9 @@
 (global-set-key (kbd "M-o") 'other-window)
 (define-key ibuffer-mode-map (kbd "M-o") 'other-window)
 
+;; Always answer only y or n
+(defalias 'yes-or-no-p 'y-or-n-p)
+
 
 (add-to-list 'auto-mode-alist '("\\.m\\'" . octave-mode))
 ;; Open header files as c++
