@@ -51,40 +51,81 @@
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
  )
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;; WINDOWS SPECIFIC ;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (if(eq system-type 'windows-nt)
-    (
-     (setenv "PATH" (concat "C:\\msys64\\usr\\bin;" (getenv "PATH") ))
-     (setq exec-path (append '("C:/msys64/usr/bin")  exec-path))
-     )
- (put 'dired-find-alternate-file 'disabled nil)
+    (setenv "PATH" (concat "C:\\msys64\\usr\\bin;" (getenv "PATH") ))
+  )
+(if(eq system-type 'windows-nt)
+    (setq exec-path (append '("C:/msys64/usr/bin")  exec-path))
+  )
+(if(eq system-type 'windows-nt)
+    (w32-send-sys-command 61488)
+  )
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;; GNU/LINUX SPECIFIC ;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(if(eq system-type 'gnu/linux )
+    (setq python-shell-interpreter "/bin/python3.6")
+  )
+
+
+(require 'ido)
+(require 'ibuffer)
+
 
 ;; Always highlight parenthesis
+(desktop-save-mode 1)
+(electric-layout-mode 1)
+(electric-pair-mode 1)
+(global-hl-line-mode 1)
+(ido-mode t)
+(savehist-mode 1)
 (show-paren-mode 1)
-(setq column-number-mode t)
 (transient-mark-mode 0) ; Don't show highlight
 
-(defun dired-ediff-marked-files ()
-    "Run ediff on marked ediff files."
-    (interactive)
-    (set 'marked-files (dired-get-marked-files))
-    (when (= (safe-length marked-files) 2)
-        (ediff-files (nth 0 marked-files) (nth 1 marked-files)))
 
-    (when (= (safe-length marked-files) 3)
-        (ediff3 (buffer-file-name (nth 0 marked-files))
-                (buffer-file-name (nth 1 marked-files))
-                (buffer-file-name (nth 2 marked-files)))))
-(defun my-c-mode-hook ()
-  ; (setq auto-fill-function 'do-auto-fill)
-  ;(c-set-style "Linux")
-  ;(c-set-offset 'substatement-open '0) ; brackets should be at same indentation level as the statements they open
-  ;(c-set-offset 'inline-open '+)
-  ;(c-set-offset 'block-open '+)
-  ;(c-set-offset 'brace-list-open '+)   ; all "opens" should be indented by the c-indent-level
-  ;(c-set-offset 'case-label '+)
-  )       ; indent case labels by c-indent-level, too
+(setq column-number-mode t)
+(setq desktop-restore-eager 5)
+(setq next-line-add-newlines t) ; C-n will always add new line
+(setq dired-dwim-target t) ; Dired guess target
+(setq grep-find-use-xargs 'exec-plus) ; Execute greps in one process
+(setq ido-use-filename-at-point 'guess)
+(setq load-home-init-file t) ; don't load init file from ~/.xemacs/init.el
 
 (setq-default indent-tabs-mode nil)
+
+
+(put 'dired-do-copy 'ido 'find-file)
+(put 'dired-do-rename 'ido 'find-file)
+(put 'dired-find-alternate-file 'disabled nil)
+(put 'downcase-region 'disabled nil)
+(put 'narrow-to-region 'disabled nil)
+(put 'upcase-region 'disabled nil)
+
+
+(global-set-key (kbd "C-x C-b") 'ibuffer)
+(global-set-key [f11] 'toggle-frame-fullscreen)
+(global-set-key (kbd "M-o") 'other-window)
+(define-key ibuffer-mode-map (kbd "M-o") 'other-window)
+
+
+(add-to-list 'auto-mode-alist '("\\.m\\'" . octave-mode))
+;; Open header files as c++
+(add-to-list 'auto-mode-alist '("\\.h\\'" . c++-mode))
+
+;; HOOKS
+(add-hook 'before-save-hook 'delete-trailing-whitespace)
+
+(add-hook 'dired-load-hook
+          (function (lambda () (load "dired-x"))))
+
+(add-hook 'ibuffer-mode-hook
+          (lambda ()
+            (define-key ibuffer-mode-map "\C-x\C-f"
+              'ibuffer-ido-find-file)))
 
 (add-hook 'c-mode-common-hook
 	  (lambda () (setq indent-tabs-mode t)
@@ -102,11 +143,10 @@
             )
           )
 
-(load-file "~/.emacs.d/smart-tabs-mode.el")
+
+;; SMART TABS
+(load-file "~/.emacs.d/smart_tabs_mode.el")
 (smart-tabs-insinuate 'c 'c++ )
-
-(setq python-shell-interpreter "/bin/python3.6")
-
 
 
 ; Show file full path in title bar
@@ -116,80 +156,20 @@
               dired-directory
               (revert-buffer-function " %b"
                                       ("%b - Dir:  " default-directory)))))))
+; Disable toolbars
 (progn
   (if (fboundp 'tool-bar-mode) (tool-bar-mode -1))
   (menu-bar-mode -1)
   (scroll-bar-mode -1)
-)
-(add-hook 'before-save-hook 'delete-trailing-whitespace)
-
-(require 'ido)
-(ido-mode t)
-(setq ido-use-filename-at-point 'guess)
-
-(setq load-home-init-file t) ; don't load init file from ~/.xemacs/init.el
-
-(add-hook 'dired-load-hook
-          (function (lambda () (load "dired-x"))))
-
-;; Open header files as c++
-(add-to-list 'auto-mode-alist '("\\.h\\'" . c++-mode))
-(put 'upcase-region 'disabled nil)
-(put 'downcase-region 'disabled nil)
-
-(setq grep-find-use-xargs 'exec-plus)
-
-(defun ibuffer-ido-find-file (file &optional wildcards)
-  "Like `ido-find-file', but default to the directory of the buffer at point."
-  (interactive
-   (let ((default-directory
-           (let ((buf (ibuffer-current-buffer)))
-             (if (buffer-live-p buf)
-                 (with-current-buffer buf
-                   default-directory)
-               default-directory))))
-     (list (ido-read-file-name "Find file: " default-directory) t)))
-  (find-file file wildcards))
-
-(require 'ibuffer)
-(add-hook 'ibuffer-mode-hook
-          (lambda ()
-            (define-key ibuffer-mode-map "\C-x\C-f"
-              'ibuffer-ido-find-file)))
-
-(global-set-key (kbd "C-x C-b") 'ibuffer)
-(global-set-key [f11] 'toggle-frame-fullscreen)
-(global-set-key (kbd "M-o") 'other-window)
-
-(define-key ibuffer-mode-map (kbd "M-o") 'other-window)
-
-(savehist-mode 1)                       ; Save minibuffer
-(electric-layout-mode 1)
-(electric-pair-mode 1)
-(hl-line-mode 1)
+  )
 
 
-(w32-send-sys-command 61488)
-
-(desktop-save-mode 1)
-(setq desktop-restore-eager 5)
-
-;; C-n will always add new line
-(setq next-line-add-newlines t)
-(setq dired-dwim-target t)
-
-(setq dired-dwim-target t)              ;
-
-(put 'narrow-to-region 'disabled nil)
-(put 'dired-do-rename 'ido 'find-file)
-(put 'dired-do-copy 'ido 'find-file)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;; ORG - MODE ;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (setq org-src-fontify-natively t)
-(require 'org-annotate-file)
-;;;;;;;;;;;
+
 
 
 
@@ -260,3 +240,29 @@
     (ediff-buffers (car marked-buffers) (cadr marked-buffers))))
 
 (define-key ibuffer-mode-map "e" 'ibuffer-ediff-marked-buffers)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun ibuffer-ido-find-file (file &optional wildcards)
+  "Like `ido-find-file', but default to the directory of the buffer at point."
+  (interactive
+   (let ((default-directory
+           (let ((buf (ibuffer-current-buffer)))
+             (if (buffer-live-p buf)
+                 (with-current-buffer buf
+                   default-directory)
+               default-directory))))
+     (list (ido-read-file-name "Find file: " default-directory) t)))
+  (find-file file wildcards))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun dired-ediff-marked-files ()
+    "Run ediff on marked ediff files."
+    (interactive)
+    (set 'marked-files (dired-get-marked-files))
+    (when (= (safe-length marked-files) 2)
+        (ediff-files (nth 0 marked-files) (nth 1 marked-files)))
+
+    (when (= (safe-length marked-files) 3)
+        (ediff3 (buffer-file-name (nth 0 marked-files))
+                (buffer-file-name (nth 1 marked-files))
+                (buffer-file-name (nth 2 marked-files)))))
