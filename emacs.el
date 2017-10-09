@@ -13,7 +13,8 @@
    [default default default italic underline success warning error])
  '(ansi-color-names-vector
    ["black" "#d55e00" "#009e73" "#f8ec59" "#0072b2" "#cc79a7" "#56b4e9" "white"])
- '(custom-enabled-themes (quote (tsdh-dark)))
+ '(custom-enabled-themes (quote (wombat)))
+  '(dired-x-hands-off-my-keys nil)
  '(dired-recursive-copies (quote always))
  '(dired-recursive-deletes (quote always))
  '(ibuffer-saved-filter-groups
@@ -50,7 +51,12 @@
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
  )
-(put 'dired-find-alternate-file 'disabled nil)
+(if(eq system-type 'windows-nt)
+    (
+     (setenv "PATH" (concat "C:\\msys64\\usr\\bin;" (getenv "PATH") ))
+     (setq exec-path (append '("C:/msys64/usr/bin")  exec-path))
+     )
+ (put 'dired-find-alternate-file 'disabled nil)
 
 ;; Always highlight parenthesis
 (show-paren-mode 1)
@@ -123,8 +129,6 @@
 
 (setq load-home-init-file t) ; don't load init file from ~/.xemacs/init.el
 
-;; (add-to-list 'load-path "~/.emacs.d/iedit")
-;; (require 'iedit)
 (add-hook 'dired-load-hook
           (function (lambda () (load "dired-x"))))
 
@@ -160,22 +164,33 @@
 (define-key ibuffer-mode-map (kbd "M-o") 'other-window)
 
 (savehist-mode 1)                       ; Save minibuffer
+(electric-layout-mode 1)
+(electric-pair-mode 1)
+(hl-line-mode 1)
 
-;; (w32-send-sys-command 61488)
+
+(w32-send-sys-command 61488)
 
 (desktop-save-mode 1)
-;; (setq desktop-restore-eager 10)
-
- (add-to-list 'auto-mode-alist '("\\.m\\'" . octave-mode))
+(setq desktop-restore-eager 5)
 
 ;; C-n will always add new line
 (setq next-line-add-newlines t)
 (setq dired-dwim-target t)
 
+(setq dired-dwim-target t)              ;
+
+(put 'narrow-to-region 'disabled nil)
+(put 'dired-do-rename 'ido 'find-file)
+(put 'dired-do-copy 'ido 'find-file)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;; ORG - MODE ;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (setq org-src-fontify-natively t)
+(require 'org-annotate-file)
+;;;;;;;;;;;
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
