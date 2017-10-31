@@ -96,6 +96,7 @@
 (setq grep-find-use-xargs 'exec-plus) ; Execute greps in one process
 (setq ido-use-filename-at-point 'guess)
 (setq load-home-init-file t) ; don't load init file from ~/.xemacs/init.el
+(setq visual-line-fringe-indicators '(left-curly-arrow right-curly-arrow)) ; Show arrows on long lines
 
 (setq-default indent-tabs-mode nil)
 
