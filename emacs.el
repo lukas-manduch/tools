@@ -45,7 +45,8 @@
         (mode . lisp-mode)))))))
  '(ido-enable-flex-matching t)
  '(ido-everywhere t)
- '(package-selected-packages (quote (dash nhexl-mode)))
+ '(org-startup-indented t)
+ '(package-selected-packages (quote (jedi nhexl-mode)))
  '(show-trailing-whitespace t))
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
