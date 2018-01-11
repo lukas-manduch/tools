@@ -77,6 +77,7 @@
 
 (require 'ido)
 (require 'ibuffer)
+(require 'evil)
 
 
 ;; Always highlight parenthesis
@@ -122,6 +123,13 @@
 (add-to-list 'auto-mode-alist '("\\.m\\'" . octave-mode))
 ;; Open header files as c++
 (add-to-list 'auto-mode-alist '("\\.h\\'" . c++-mode))
+
+
+
+(add-hook 'prog-mode-hook
+          (lambda () (evil-local-mode 1)
+            ;; (hs-minor-mode 1)
+            ))
 
 ;; HOOKS
 (add-hook 'before-save-hook 'delete-trailing-whitespace)
