@@ -77,6 +77,7 @@
 
 (require 'ido)
 (require 'ibuffer)
+(require 'uniquify)
 
 
 ;; Always highlight parenthesis
@@ -98,6 +99,7 @@
 (setq ido-use-filename-at-point 'guess)
 (setq load-home-init-file t) ; don't load init file from ~/.xemacs/init.el
 (setq visual-line-fringe-indicators '(left-curly-arrow right-curly-arrow)) ; Show arrows on long lines
+(setq uniquify-buffer-name-style 'post-forward)
 
 (setq-default indent-tabs-mode nil)
 
