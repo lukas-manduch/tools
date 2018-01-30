@@ -20,6 +20,7 @@ let $LANG = 'en_US'
 "-----------------
 " Set Path TODO: if (windows)
 let $PATH = 'C:\msys64\usr\bin;' . $PATH
+set viewdir=~\.vim\views
 " set path=.,**
 
 
@@ -49,6 +50,8 @@ endfunction
 if has("autocmd")
 	autocmd FileType python setlocal tabstop=4 softtabstop=4 shiftwidth=4 expandtab
 	autocmd BufNewFile,BufRead *.m setfiletype matlab
+	autocmd BufWinLeave *.* mkview
+	autocmd BufWinEnter *.* silent loadview
 endif
 
 colorscheme evening
