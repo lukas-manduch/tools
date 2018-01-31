@@ -1,6 +1,6 @@
 set autoindent
 set backup
-set guifont=Consolas:h12
+" set guifont=Consolas:h12
 set incsearch
 set hidden
 set history=50
@@ -18,9 +18,11 @@ set ignorecase
 set langmenu=en_US
 let $LANG = 'en_US'
 "-----------------
-" Set Path TODO: if (windows)
-let $PATH = 'C:\msys64\usr\bin;' . $PATH
-set viewdir=~\.vim\views
+" Set Path
+if has("win32")
+   let $PATH = 'C:\msys64\usr\bin;' . $PATH
+   set viewdir=~\.vim\views
+endif
 " set path=.,**
 
 
