@@ -78,7 +78,7 @@
 (require 'ido)
 (require 'ibuffer)
 (require 'uniquify)
-
+;; (require 'evil)
 
 ;; Always highlight parenthesis
 (desktop-save-mode 1)
@@ -126,7 +126,13 @@
 ;; Open header files as c++
 (add-to-list 'auto-mode-alist '("\\.h\\'" . c++-mode))
 
+
 ;; HOOKS
+(add-hook 'prog-mode-hook
+              (lambda () (if (boundp 'evil-mode)
+                              (evil-local-mode 1))
+                ))
+
 (add-hook 'before-save-hook 'delete-trailing-whitespace)
 
 (add-hook 'dired-load-hook
@@ -192,9 +198,6 @@
 (setq org-mobile-inbox-for-pull "~/notes/inbox.org")
 (setq org-mobile-directory "~/MobileOrg")
 (setq org-mobile-files '("~/notes/"))
-
-
-
 
 (require 'org-crypt)
 (org-crypt-use-before-save-magic)
