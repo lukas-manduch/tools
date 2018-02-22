@@ -100,6 +100,7 @@
 (setq load-home-init-file t) ; don't load init file from ~/.xemacs/init.el
 (setq visual-line-fringe-indicators '(left-curly-arrow right-curly-arrow)) ; Show arrows on long lines
 (setq uniquify-buffer-name-style 'post-forward)
+(setq evil-want-C-u-scroll t)
 
 (setq-default indent-tabs-mode nil)
 
@@ -152,6 +153,8 @@
             )
           )
 
+(with-eval-after-load 'evil
+    (defalias #'forward-evil-word #'forward-evil-symbol))
 
 ;; SMART TABS
 (load-file "~/.emacs.d/smart_tabs_mode.el")
