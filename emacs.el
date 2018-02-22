@@ -181,9 +181,20 @@
 ;;;;;;;;;;;;;;;;;;; ORG - MODE ;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (setq org-src-fontify-natively t)
-(load-file "~/.emacs.d/org-bullets.el")
-(require 'org-bullets)
-(add-hook 'org-mode-hook (lambda () (org-bullets-mode 1)))
+(global-set-key "\C-cl" 'org-store-link)
+(global-set-key "\C-ca" 'org-agenda)
+(global-set-key "\C-cc" 'org-capture)
+(global-set-key "\C-cb" 'org-iswitchb)
+
+(setq org-directory "~/notes")
+(setq org-agenda-files (list "~/notes"))
+
+(setq org-mobile-inbox-for-pull "~/notes/inbox.org")
+(setq org-mobile-directory "~/MobileOrg")
+(setq org-mobile-files '("~/notes/"))
+
+
+
 
 (require 'org-crypt)
 (org-crypt-use-before-save-magic)
