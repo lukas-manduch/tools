@@ -125,7 +125,8 @@
 (add-to-list 'auto-mode-alist '("\\.m\\'" . octave-mode))
 ;; Open header files as c++
 (add-to-list 'auto-mode-alist '("\\.h\\'" . c++-mode))
-
+;; Save also register contents
+(add-to-list 'desktop-globals-to-save 'register-alist)
 
 ;; HOOKS
 (add-hook 'prog-mode-hook
