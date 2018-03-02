@@ -194,6 +194,7 @@
 (global-set-key "\C-cb" 'org-iswitchb)
 
 (setq org-directory "~/notes")
+(setq org-default-notes-file (concat org-directory "/quick_notes.org"))
 (setq org-agenda-files (list "~/notes"))
 
 (setq org-mobile-inbox-for-pull "~/notes/inbox.org")
