@@ -1,5 +1,5 @@
 set autoindent
-set backup
+" set backup
 " set guifont=Consolas:h12
 set incsearch
 set hidden
@@ -9,7 +9,7 @@ set number
 set relativenumber
 set ruler
 set showcmd
-set patchmode=.orig~
+"set patchmode=.orig~
 
 " Search
 set hlsearch
@@ -23,7 +23,7 @@ if has("win32")
    let $PATH = 'C:\msys64\usr\bin;' . $PATH
    set viewdir=~\.vim\views
 endif
-" set path=.,**
+set path=,.,,
 
 
 "  MAPPINGS
@@ -56,4 +56,4 @@ if has("autocmd")
 	autocmd BufWinEnter *.* silent loadview
 endif
 
-colorscheme evening
+colorscheme desert
