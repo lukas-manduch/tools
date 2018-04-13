@@ -7,7 +7,7 @@ call minpac#add('Shougo/deoplete.nvim')
 call minpac#add('zchee/deoplete-jedi')
 call minpac#add('junegunn/fzf')
 let g:deoplete#enable_at_startup = 1
-nnoremap <C-p> :<C-u>FZF<CR>
+nnoremap <C-p> :<C-u>FZF<CR> 
 
 set autoindent
 " set backup
