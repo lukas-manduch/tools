@@ -8,6 +8,7 @@ call minpac#add('zchee/deoplete-jedi')
 call minpac#add('junegunn/fzf')
 let g:deoplete#enable_at_startup = 1
 nnoremap <C-p> :<C-u>FZF<CR>
+set completeopt-=preview
 
 set autoindent
 " set backup
