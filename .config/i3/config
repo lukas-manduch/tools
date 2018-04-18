@@ -145,6 +145,9 @@ exec xsetroot -solid "#333333"
 bindsym XF86AudioRaiseVolume exec --no-startup-id volume_up
 bindsym XF86AudioLowerVolume exec --no-startup-id volume_down
 
+bindsym $mod+F3 exec --no-startup-id volume_up
+bindsym $mod+F2 exec --no-startup-id volume_down
+
 bindsym $mod+Ctrl+l exec --no-startup-id i3lock -c 223344
 
 bindsym XF86MonBrightnessUp   exec --no-startup-id brightness_up
