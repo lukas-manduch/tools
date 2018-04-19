@@ -1,0 +1,8 @@
+#!/bin/bash
+if [ $# -eq 1 ]; then
+	setxkbmap -layout "$1"
+	[ -e ~/.Xmodmap ] && xmodmap ~/.Xmodmap
+else
+	setxkbmap -layout us
+	[ -e ~/.Xmodmap ] && xmodmap ~/.Xmodmap
+fi
