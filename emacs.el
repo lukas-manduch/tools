@@ -101,6 +101,11 @@
 (setq visual-line-fringe-indicators '(left-curly-arrow right-curly-arrow)) ; Show arrows on long lines
 (setq uniquify-buffer-name-style 'post-forward)
 (setq evil-want-C-u-scroll t)
+; Always split horizontally with ctrl-4-
+(setq split-height-threshold nil)
+(setq split-width-threshold 0)
+;;;;
+
 
 (setq-default indent-tabs-mode nil)
 
