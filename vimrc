@@ -21,6 +21,7 @@ set relativenumber
 set ruler
 set showcmd
 set wildmenu
+set wildignore=,*.pyc,
 
 " Search
 set hlsearch
