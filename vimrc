@@ -11,7 +11,6 @@ nnoremap <C-p> :<C-u>FZF<CR>
 set completeopt-=preview
 
 set autoindent
-" set backup
 " set guifont=Consolas:h12
 set incsearch
 set hidden
@@ -21,7 +20,7 @@ set number
 set relativenumber
 set ruler
 set showcmd
-"set patchmode=.orig~
+set wildmenu
 
 " Search
 set hlsearch
@@ -35,7 +34,7 @@ if has("win32")
    let $PATH = 'C:\msys64\usr\bin;' . $PATH
    set viewdir=~\.vim\views
 endif
-set path=,.,,
+set path=,.,,**
 
 
 "  MAPPINGS
