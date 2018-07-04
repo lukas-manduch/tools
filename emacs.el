@@ -73,12 +73,12 @@
 (if(eq system-type 'gnu/linux )
     (setq python-shell-interpreter "/bin/python3.6")
   )
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (require 'ido)
 (require 'ibuffer)
 (require 'uniquify)
-;; (require 'evil)
+(require 'evil)
 
 ;; Always highlight parenthesis
 (desktop-save-mode 1)
@@ -104,8 +104,9 @@
 ; Always split horizontally with ctrl-4-
 (setq split-height-threshold nil)
 (setq split-width-threshold 0)
-;;;;
+(setq evil-default-state 'emacs)
 
+;;;;
 
 (setq-default indent-tabs-mode nil)
 
