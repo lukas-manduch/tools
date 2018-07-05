@@ -135,11 +135,6 @@
 (add-to-list 'desktop-globals-to-save 'register-alist)
 
 ;; HOOKS
-(add-hook 'prog-mode-hook
-              (lambda () (if (boundp 'evil-mode)
-                              (evil-local-mode 1))
-                ))
-
 (add-hook 'before-save-hook 'delete-trailing-whitespace)
 
 (add-hook 'dired-load-hook
