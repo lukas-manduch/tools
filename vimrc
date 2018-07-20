@@ -69,4 +69,6 @@ if has("autocmd")
 endif
 
 colorscheme desert
+imap jj <Esc>
+
 cd ~
