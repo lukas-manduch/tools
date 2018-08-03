@@ -69,6 +69,9 @@ if has("autocmd")
 endif
 
 colorscheme desert
+
+" Mappings
 imap jj <Esc>
+vmap X y/<C-R>"<CR>
 
 cd ~
