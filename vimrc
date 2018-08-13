@@ -1,20 +1,12 @@
-""" COMMANDS for fast ues
-" set makeprg=python\ -m\ unittest\ discover\ -s\ src\ -p\ \"*_test.py\"\ -v\ 2>&1
-packadd minpac
+let g:netrw_liststyle = 3
+let g:netrw_browse_split = 4
 
-call minpac#init()
-call minpac#add('Shougo/deoplete.nvim')
-call minpac#add('zchee/deoplete-jedi')
-call minpac#add('junegunn/fzf')
-let g:deoplete#enable_at_startup = 1
-nnoremap <C-p> :<C-u>FZF<CR>
-set completeopt-=preview
-
+set nocompatible
 set autoindent
-" set guifont=Consolas:h12
-set incsearch
+set completeopt-=preview
 set hidden
 set history=50
+set incsearch
 set nowrap
 set number
 set relativenumber
@@ -75,3 +67,5 @@ imap jj <Esc>
 vmap X y/<C-R>"<CR>
 
 cd ~
+" set makeprg=python\ -m\ unittest\ discover\ -s\ src\ -p\ \"*_test.py\"\ -v\ 2>&1
+" set guifont=Consolas:h12
