@@ -1,17 +1,25 @@
 let g:netrw_liststyle = 3
 let g:netrw_browse_split = 4
 
+
 set nocompatible
+
+set autoread
 set autoindent
 set completeopt-=preview
+set encoding=utf-8
+set cursorline
 set hidden
 set history=50
 set incsearch
+set laststatus = 2
 set nowrap
 set number
 set relativenumber
 set ruler
 set showcmd
+set smartcase
+set visualbell
 set wildmenu
 set wildignore=*.pyc,
 
