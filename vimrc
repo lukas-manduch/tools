@@ -12,7 +12,7 @@ set cursorline
 set hidden
 set history=50
 set incsearch
-set laststatus = 2
+set laststatus=2
 set nowrap
 set number
 set relativenumber
