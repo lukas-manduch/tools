@@ -40,6 +40,9 @@ set path=,.,,**
 
 "  MAPPINGS
 map Y y$
+map <C-K> :bprev<CR>
+map <C-J> :bnext<CR>
+
 
 "-----------------
 set backspace=indent,eol,start
