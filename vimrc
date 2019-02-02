@@ -43,6 +43,20 @@ map Y y$
 map <C-K> :bprev<CR>
 map <C-J> :bnext<CR>
 
+let mapleader="\<Space>"
+
+" For leader key
+vmap <Leader>y "+y 
+vmap <Leader>d "+d 
+nmap <Leader>p "+p 
+nmap <Leader>P "+P 
+vmap <Leader>p "+p 
+vmap <Leader>P "+P
+nmap <Leader>n :nohl<CR>
+nmap <Leader>c :close<CR>
+nmap <Leader>o :only<CR>
+
+
 
 "-----------------
 set backspace=indent,eol,start
