@@ -88,7 +88,10 @@ endif
 colorscheme desert
 
 " Mappings
-imap jj <Esc>
+inoremap jj <Esc>
+inoremap jk <Esc>
+inoremap <esc> <nop>
+
 vmap X y/<C-R>"<CR>
 
 cd ~
