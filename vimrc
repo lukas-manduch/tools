@@ -46,17 +46,16 @@ map <C-J> :bnext<CR>
 let mapleader="\<Space>"
 
 " For leader key
-vmap <Leader>y "+y 
-vmap <Leader>d "+d 
-nmap <Leader>p "+p 
-nmap <Leader>P "+P 
-vmap <Leader>p "+p 
-vmap <Leader>P "+P
-nmap <Leader>n :nohl<CR>
-nmap <Leader>c :close<CR>
-nmap <Leader>o :only<CR>
-
-
+noremap <Leader>y "+y
+noremap <Leader>d "+d
+nnoremap <Leader>p "+p
+nnoremap <Leader>P "+P
+noremap <Leader>p "+p
+noremap <Leader>P "+P
+noremap <Leader>n :nohl<CR>
+noremap <Leader>c :close<CR>
+noremap <Leader>o :only<CR>
+noremap <Leader>b :bd<CR>
 
 "-----------------
 set backspace=indent,eol,start
@@ -79,10 +78,12 @@ function! <SID>StripTrailingWhitespaces()
 endfunction
 
 if has("autocmd")
-	autocmd FileType python setlocal tabstop=4 softtabstop=4 shiftwidth=4 expandtab
-	autocmd BufNewFile,BufRead *.m setfiletype matlab
-	autocmd BufWinLeave *.* mkview
-	autocmd BufWinEnter *.* silent loadview
+	augroup rc
+		autocmd FileType python setlocal tabstop=4 softtabstop=4 shiftwidth=4 expandtab
+		autocmd BufNewFile,BufRead *.m setfiletype matlab
+		autocmd BufWinLeave *.* mkview
+		autocmd BufWinEnter *.* silent loadview
+	augroup END
 endif
 
 colorscheme desert
