@@ -98,3 +98,30 @@ vmap X y/<C-R>"<CR>
 cd ~
 " set makeprg=python\ -m\ unittest\ discover\ -s\ src\ -p\ \"*_test.py\"\ -v\ 2>&1
 " set guifont=Consolas:h12
+
+
+set laststatus=2
+set statusline=
+set statusline+=%F
+set statusline+=%=
+set statusline+=%m
+set statusline+=%h
+set statusline+=%r
+set statusline+=\ 
+set statusline+=%l
+set statusline+=/
+set statusline+=%L
+set statusline+=\ 
+set statusline+=<
+set statusline+=%c
+set statusline+=>
+set statusline+=\ 
+set statusline+=%y
+set statusline+=\ 
+set statusline+=%{&ff}
+set statusline+=\ 
+set statusline+=%{strlen(&fenc)?&fenc:'none'}
+set statusline+=\ 
+set statusline+=%k
+set statusline+=\ 
+set statusline+=%P
