@@ -1,0 +1,49 @@
+{
+	"auto_complete": false,
+	"auto_complete_commit_on_tab": true,
+	"auto_complete_cycle": true,
+	"auto_find_in_selection": true,
+	"caret_extra_bottom": 3,
+	"caret_extra_top": 3,
+	"caret_extra_width": 2,
+	"caret_style": "phase",
+	"color_scheme": "Packages/Color Scheme - Default/Mariana.sublime-color-scheme",
+	"drag_text": false,
+	"enable_hexadecimal_encoding": false,
+	"folder_exclude_patterns":
+	[
+		".svn",
+		".git",
+		".hg",
+		"CVS"
+	],
+	"font_face": "Consolas",
+	"font_size": 13.5,
+	"highlight_line": true,
+	"highlight_modified_tabs": true,
+	"hot_exit": false,
+	"ignored_packages":
+	[
+		"Vintage"
+	],
+	"index_exclude_patterns":
+	[
+		"*.log",
+		".*"
+	],
+	"margin": -10,
+	"match_brackets": false,
+	"match_brackets_angle": false,
+	"match_brackets_braces": false,
+	"match_brackets_content": false,
+	"match_brackets_square": false,
+	"rulers":
+	[
+		80
+	],
+	"scroll_speed": 0.2,
+	"show_encoding": true,
+	"show_line_endings": true,
+	"theme": "Adaptive.sublime-theme",
+	"trim_automatic_white_space": true
+}
