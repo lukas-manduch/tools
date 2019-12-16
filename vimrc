@@ -2,6 +2,10 @@ let g:netrw_liststyle = 3
 let g:netrw_browse_split = 0
 
 let g:ctrlp_extensions = ['tag', 'buffertag'] 
+" let g:ale_completion_enabled = 1
+" let g:ale_linters = {'python': ['pyls']}
+
+
 
 set nocompatible
 
@@ -23,6 +27,7 @@ set smartcase
 set visualbell
 set wildmenu
 set wildignore=*.pyc,
+set colorcolumn=80
 
 " Search
 set hlsearch
@@ -57,6 +62,11 @@ noremap <Leader>n :nohl<CR>
 noremap <Leader>c :close<CR>
 noremap <Leader>o :only<CR>
 noremap <Leader>b :bd<CR>
+
+noremap <Leader><C-r> :CtrlPBufTag<CR>
+noremap <Leader><C-p> :CtrlPTag<CR>
+inoremap <silent> <C-Space> <C-\><C-O>:AleComplete<CR>
+
 
 "-----------------
 set backspace=indent,eol,start
