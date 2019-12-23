@@ -47,8 +47,8 @@ set path=,.,,**
 
 "  MAPPINGS
 map Y y$
-map <C-K> :bprev<CR>
-map <C-J> :bnext<CR>
+" map <C-K> :bprev<CR>
+" map <C-J> :bnext<CR>
 
 let mapleader="\<Space>"
 
@@ -63,6 +63,7 @@ noremap <Leader>n :nohl<CR>
 noremap <Leader>c :close<CR>
 noremap <Leader>o :only<CR>
 noremap <Leader>b :bd<CR>
+nnoremap <Leader>s :%s/\<<C-r><C-w>\>//g<Left><Left>
 
 noremap <Leader><C-r> :CtrlPBufTag<CR>
 noremap <Leader><C-p> :CtrlPTag<CR>
