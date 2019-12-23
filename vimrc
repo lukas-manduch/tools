@@ -3,7 +3,7 @@ let g:netrw_browse_split = 0
 
 let g:ctrlp_extensions = ['tag', 'buffertag'] 
 " let g:ale_completion_enabled = 1
-" let g:ale_linters = {'python': ['pyls']}
+let g:ale_linters = {'python': ['pyls', 'mypy']}
 
 
 
@@ -39,7 +39,8 @@ let $LANG = 'en_US'
 " Set Path
 if has("win32")
    let $PATH = 'C:\msys64\usr\bin;' . $PATH
-   set viewdir=~\.vim\views
+   set viewdir=~\vimfiles\views
+   set dir=~\vimfiles\swap
 endif
 set path=,.,,**
 
@@ -65,7 +66,7 @@ noremap <Leader>b :bd<CR>
 
 noremap <Leader><C-r> :CtrlPBufTag<CR>
 noremap <Leader><C-p> :CtrlPTag<CR>
-inoremap <silent> <C-Space> <C-\><C-O>:AleComplete<CR>
+inoremap <silent> <C-Space> <C-\><C-O>:ALEComplete<CR>
 
 
 "-----------------
