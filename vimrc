@@ -2,8 +2,26 @@ let g:netrw_liststyle = 3
 let g:netrw_browse_split = 0
 
 let g:ctrlp_extensions = ['tag', 'buffertag'] 
-" let g:ale_completion_enabled = 1
 let g:ale_linters = {'python': ['pyls', 'mypy']}
+
+let g:ale_python_pyls_config = {
+	\   'pyls': {
+		\    'plugins': {
+			\     'pylint': {
+				\       'enabled' : v:true 
+					\     },
+			\     'pyflakes': {
+				\       'enabled': v:true
+					\     },
+			\     'pydocstyle': {
+				\      'enabled': v:true
+					\     },
+			\     'pycodestyle': {
+				\      'enabled': v:true
+					\     }
+			\   }
+		\ }
+	\}
 
 
 
