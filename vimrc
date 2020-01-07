@@ -46,6 +46,14 @@ set visualbell
 set wildmenu
 set wildignore=*.pyc,
 set colorcolumn=80
+set scrolloff=4
+
+" Gvim
+set guioptions-=r
+set guioptions-=L
+set guioptions+=m
+set guioptions-=T
+
 
 " Search
 set hlsearch
