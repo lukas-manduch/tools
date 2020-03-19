@@ -48,6 +48,10 @@ set wildignore=*.pyc,
 set colorcolumn=80
 set scrolloff=4
 
+" Disable execution of modeline
+set nomodeline
+set nomodelineexpr
+
 " Gvim
 set guioptions-=r
 set guioptions-=L
