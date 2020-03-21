@@ -176,3 +176,169 @@ set statusline+=\
 set statusline+=%l
 set statusline+=/
 set statusline+=%L
+
+
+function! s:CreateDirectory(dirName)
+	if isdirectory(a:dirName)
+		return 1
+	endif
+	if !empty(glob(a:dirName))
+		return 0
+	endif
+
+	call mkdir(a:dirName, "p", 0700)
+	if isdirectory(a:dirName)
+		return 1
+	endif
+	return 0
+endfunction
+
+
+function! s:SetupDirectories(rtpDirName)
+	let l:result = 1
+	if !s:CreateDirectory(a:rtpDirName)
+		echom "Cannot create" . a:rtpDirName
+		return 0
+	endif
+
+	if !s:CreateDirectory(a:rtpDirName . "/views")
+		echom "Cannot creted dir for   views"
+		let l:result = 0
+	endif
+
+	if !s:CreateDirectory(a:rtpDirName . "/sessions")
+		echom "Cannot creted dir for   sessions"
+		let l:result = 0
+	endif
+	if !s:CreateDirectory(a:rtpDirName . "/swap")
+		echom "Cannot creted dir for  /swap"
+		let l:result = 0
+	endif
+	if !s:CreateDirectory(a:rtpDirName . "/pack/plugins/start")
+		echom "Cannot creted dir for   pack/plugins/start"
+		let l:result = 0
+	endif
+	if !s:CreateDirectory(a:rtpDirName . "/pack/plugins/opt")
+		echom "Cannot creted dir for   pack/plugins/opt"
+		let l:result = 0
+	endif
+	if !s:CreateDirectory(a:rtpDirName . "/pack/themes/start")
+		echom "Cannot creted dir for   pack/themes/start"
+		let l:result = 0
+	endif
+	return l:result
+endfunction
+
+function s:SetupVimSettings(dir)
+	if !isdirectory(a:dir)
+		echom "Invalid directory " . a:dir
+	endif
+	" Views
+	if isdirectory(a:dir . "/views")
+		let &viewdir= a:dir . "/views"
+	else
+		echom "No view directory"
+	endif
+	" Swap
+	if isdirectory(a:dir . "/swap")
+		let &viewdir = a:dir . "/swap"
+	else
+		echom "No swap directory"
+	endif
+	if has('shada')
+		let &shada = "!,%,'100,/10,:10,<50,s10,h"
+		let &shadafile = a:dir . "/shada"
+	endif
+	if executable('rg')
+		let &grepprg = "rg --vimgrep --color=auto $*"
+	endif
+endfunction
+
+
+
+
+function! s:SetupVimPlug(path)
+	let l:user_wd = getcwd()
+	let l:plugin_path = a:path
+	let l:plug_start =  l:plugin_path . "/pack/plugins/opt"
+
+	if !isdirectory(l:plug_start)
+		echom "NE " . l:plug_start
+		return 0
+	endif
+	if confirm("Setup in dir " . l:plug_start, "Yes\nNo", 2) == 2
+		return 2
+	endif
+
+	echom "Cloning vimplug"
+	if !executable('git')
+		echom "Git executable not found :("
+		return 0
+	endif
+	if isdirectory(l:plug_start)
+		execute "cd" fnameescape(l:plug_start)
+		pwd
+		!git clone https://github.com/junegunn/vim-plug.git ./vim-plug/plugin
+	endif
+	execute "cd" fnameescape(l:user_wd)
+endfunction
+
+function! s:CommonSetup()
+	if empty(&rtp)
+		echom "No path found (rtp)"
+		return 1
+	endif
+	let l:plugin_path =  split(&rtp, ",")[0]
+	call s:SetupVimSettings(l:plugin_path)
+endfunction
+call s:CommonSetup()
+
+function! s:SetUpDependencies(rootDir)
+	let l:opt = a:rootDir . "/pack/plugins/opt/"
+	let l:start = a:rootDir . "/pack/plugins/start/"
+	if !isdirectory(l:opt)
+		echom "No opt dir"
+		return 1
+	endif
+	if !isdirectory(l:start)
+		echom "No start dir"
+		return 1
+	endif
+		
+
+	call plug#begin(l:start)
+	Plug 'tpope/vim-sensible'
+	Plug 'tpope/vim-surround'
+	Plug 'psliwka/vim-smoothie'
+	if executable('fzf')
+		Plug 'junegunn/fzf'
+		Plug 'junegunn/fzf.vim'
+	endif
+	call plug#end()
+	PlugInstall
+	PlugUpdate
+
+	call plug#begin(l:opt)
+	Plug 'dense-analysis/ale'
+	call plug#end()
+	PlugInstall
+	PlugUpdate
+	packloadall
+endfunction
+
+function! MYSetupVim()
+	if empty(&rtp)
+		echom "No path found (rtp)"
+		return 1
+	endif
+	let l:plugin_path =  split(&rtp, ",")[0]
+	call s:SetupDirectories(l:plugin_path)
+	call s:SetupVimPlug(l:plugin_path)
+	packloadall
+	packadd vim-plug
+	if !exists('g:loaded_plug')
+		return
+	endif
+	call s:SetUpDependencies(l:plugin_path)
+	call s:CommonSetup()
+endfunction
