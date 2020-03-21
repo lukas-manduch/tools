@@ -31,6 +31,7 @@ set autoread
 set autoindent
 set completeopt-=preview
 set encoding=utf-8
+set fileencoding=utf-8
 set cursorline
 set hidden
 set history=50
