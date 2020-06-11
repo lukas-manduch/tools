@@ -23,7 +23,9 @@ let g:ale_python_pyls_config = {
 		\ }
 	\}
 
-
+:packadd nvim-lsp
+lua require'nvim_lsp'.pyls.setup{}
+lua require'nvim_lsp'.tsserver.setup{}
 
 set nocompatible
 
@@ -129,6 +131,13 @@ if has("autocmd")
 		autocmd BufWinEnter *.* silent loadview
 	augroup END
 endif
+
+if has("autocmd") && exists("+omnifunc")
+autocmd Filetype *
+    \ if &omnifunc == "" |
+    \ setlocal omnifunc=syntaxcomplete#Complete |
+    \ endif
+    endif 
 
 colorscheme desert
 
@@ -241,7 +250,7 @@ function s:SetupVimSettings(dir)
 	endif
 	" Swap
 	if isdirectory(a:dir . "/swap")
-		let &viewdir = a:dir . "/swap"
+		let &dir = a:dir . "/swap"
 	else
 		echom "No swap directory"
 	endif
@@ -293,7 +302,7 @@ function! s:CommonSetup()
 endfunction
 call s:CommonSetup()
 
-function! s:SetUpDependencies(rootDir)
+function! s:SetUpDependencies(rootDir, opt)
 	let l:opt = a:rootDir . "/pack/plugins/opt/"
 	let l:start = a:rootDir . "/pack/plugins/start/"
 	if !isdirectory(l:opt)
@@ -304,29 +313,40 @@ function! s:SetUpDependencies(rootDir)
 		echom "No start dir"
 		return 1
 	endif
-		
 
-	call plug#begin(l:start)
-	Plug 'tpope/vim-sensible'
-	Plug 'tpope/vim-surround'
-	Plug 'psliwka/vim-smoothie'
-	if executable('fzf')
-		Plug 'junegunn/fzf'
-		Plug 'junegunn/fzf.vim'
+	if a:opt
+		call plug#begin(l:opt)
+		Plug 'neoclide/coc.nvim', {'branch': 'release'}
+		Plug 'dyng/ctrlsf.vim'
+		Plug 'leafgarland/typescript-vim'
+		Plug 'peitalin/vim-jsx-typescript'
+		call plug#end()
+		PlugInstall
+		PlugUpdate
+	else
+		call plug#begin(l:start)
+		Plug 'tpope/vim-sensible'
+		Plug 'tpope/vim-surround'
+		Plug 'psliwka/vim-smoothie'
+		Plug 'jiangmiao/auto-pairs'
+		if executable('fzf')
+			Plug 'junegunn/fzf'
+			Plug 'junegunn/fzf.vim'
+		endif
+		if has('nvim')
+			Plug 'neovim/nvim-lsp'
+		endif
+		call plug#end()
+		PlugInstall
+		PlugUpdate
 	endif
-	call plug#end()
-	PlugInstall
-	PlugUpdate
 
-	call plug#begin(l:opt)
-	Plug 'dense-analysis/ale'
-	call plug#end()
-	PlugInstall
-	PlugUpdate
+
 	packloadall
 endfunction
 
-function! MYSetupVim()
+function! MYSetupVim(...)
+" When given 1 as argument, installs opt
 	if empty(&rtp)
 		echom "No path found (rtp)"
 		return 1
@@ -339,6 +359,7 @@ function! MYSetupVim()
 	if !exists('g:loaded_plug')
 		return
 	endif
-	call s:SetUpDependencies(l:plugin_path)
+	let arg = get(a:, 0, 0) == 1
+	call s:SetUpDependencies(l:plugin_path, arg)
 	call s:CommonSetup()
 endfunction
