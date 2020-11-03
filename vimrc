@@ -1,32 +1,6 @@
 let g:netrw_liststyle = 3
 let g:netrw_browse_split = 0
 
-let g:ctrlp_extensions = ['tag', 'buffertag'] 
-let g:ale_linters = {'python': ['pyls', 'mypy']}
-
-let g:ale_python_pyls_config = {
-	\   'pyls': {
-		\    'plugins': {
-			\     'pylint': {
-				\       'enabled' : v:true 
-					\     },
-			\     'pyflakes': {
-				\       'enabled': v:true
-					\     },
-			\     'pydocstyle': {
-				\      'enabled': v:true
-					\     },
-			\     'pycodestyle': {
-				\      'enabled': v:true
-					\     }
-			\   }
-		\ }
-	\}
-
-:packadd nvim-lsp
-lua require'nvim_lsp'.pyls.setup{}
-lua require'nvim_lsp'.tsserver.setup{}
-
 set nocompatible
 
 set autoread
@@ -111,33 +85,14 @@ syntax on
 
 set tabstop=8 softtabstop=8 shiftwidth=8 noexpandtab
 
-function! <SID>StripTrailingWhitespaces()
-    " Preparation: save last search, and cursor position.
-    let _s=@/
-    let l = line(".")
-    let c = col(".")
-    " Do the business:
-    %s/\s\+$//e
-    " Clean up: restore previous search history, and cursor position
-    let @/=_s
-    call cursor(l, c)
-endfunction
-
 if has("autocmd")
 	augroup rc
 		autocmd FileType python setlocal tabstop=4 softtabstop=4 shiftwidth=4 expandtab
 		autocmd BufNewFile,BufRead *.m setfiletype matlab
 		autocmd BufWinLeave *.* mkview
-		autocmd BufWinEnter *.* silent loadview
+		autocmd BufWinEnter *.* silent! loadview
 	augroup END
 endif
-
-if has("autocmd") && exists("+omnifunc")
-autocmd Filetype *
-    \ if &omnifunc == "" |
-    \ setlocal omnifunc=syntaxcomplete#Complete |
-    \ endif
-    endif 
 
 colorscheme desert
 
@@ -147,10 +102,6 @@ inoremap jk <Esc>
 inoremap <esc> <nop>
 
 vmap X y/<C-R>"<CR>
-
-cd ~
-" set makeprg=python\ -m\ unittest\ discover\ -s\ src\ -p\ \"*_test.py\"\ -v\ 2>&1
-" set guifont=Consolas:h12
 
 set laststatus=2
 set statusline=
@@ -316,10 +267,6 @@ function! s:SetUpDependencies(rootDir, opt)
 
 	if a:opt
 		call plug#begin(l:opt)
-		Plug 'neoclide/coc.nvim', {'branch': 'release'}
-		Plug 'dyng/ctrlsf.vim'
-		Plug 'leafgarland/typescript-vim'
-		Plug 'peitalin/vim-jsx-typescript'
 		call plug#end()
 		PlugInstall
 		PlugUpdate
