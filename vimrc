@@ -96,11 +96,6 @@ endif
 
 colorscheme desert
 
-" Mappings
-inoremap jj <Esc>
-inoremap jk <Esc>
-inoremap <esc> <nop>
-
 vmap X y/<C-R>"<CR>
 
 set laststatus=2
