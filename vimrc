@@ -206,6 +206,7 @@ function s:SetupVimSettings(dir)
 	endif
 	if executable('rg')
 		let &grepprg = "rg --vimgrep --color=auto $*"
+		let $FZF_DEFAULT_COMMAND="rg --files"
 	endif
 endfunction
 
