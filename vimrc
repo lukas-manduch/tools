@@ -1,3 +1,8 @@
+" Anything can be here and it will override call
+let g:TEST_COMMAND = get(g:, 'TEST_COMMAND', "")
+let g:TMUX_COMMAND = get(g:, 'TMUX_COMMAND', "invoke test")
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
 let g:netrw_liststyle = 3
 let g:netrw_browse_split = 0
 
@@ -71,6 +76,8 @@ noremap <Leader>c :close<CR>
 noremap <Leader>o :only<CR>
 noremap <Leader>b :bd<CR>
 nnoremap <Leader>s :%s/\<<C-r><C-w>\>//g<Left><Left>
+
+nmap <leader>t :call ExecuteTest()<CR>
 
 noremap <Leader><C-r> :CtrlPBufTag<CR>
 noremap <Leader><C-p> :CtrlPTag<CR>
@@ -305,4 +312,19 @@ function! MYSetupVim(...)
 	let arg = get(a:, 0, 0) == 1
 	call s:SetUpDependencies(l:plugin_path, arg)
 	call s:CommonSetup()
+endfunction
+
+
+function! ExecuteTest()
+        if g:TEST_COMMAND != ""
+                execute "!" . g:TEST_COMMAND
+                return
+        endif
+        if $TMUX == ""
+                execute "!" . g:TMUX_COMMAND
+        endif
+        " We are in tmux, let's get pane
+        let l:pane_id_command = "tmux list-panes | grep -v 'active' | cut -d: -f1 | tail -1 | tr -d '\r\n'"
+        let l:pane_id = system(l:pane_id_command)
+        execute "!tmux send -t " . l:pane_id . " C-a C-k " . shellescape(g:TMUX_COMMAND) . " ENTER"
 endfunction
