@@ -19,8 +19,8 @@ set history=50
 set incsearch
 set laststatus=2
 set nowrap
-set number
-set relativenumber
+"set number
+"set relativenumber
 set ruler
 set showcmd
 set smartcase
@@ -95,6 +95,7 @@ set tabstop=8 softtabstop=8 shiftwidth=8 noexpandtab
 if has("autocmd")
 	augroup rc
 		autocmd FileType python setlocal tabstop=4 softtabstop=4 shiftwidth=4 expandtab
+		autocmd FileType yaml setlocal tabstop=4 softtabstop=0 shiftwidth=0 expandtab
 		autocmd BufNewFile,BufRead *.m setfiletype matlab
 		autocmd BufWinLeave *.* mkview
 		autocmd BufWinEnter *.* silent! loadview
