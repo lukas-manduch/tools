@@ -22,7 +22,9 @@
                     }
                 }
                 var header = Header.FromBytes(headerBytes);
-                Console.WriteLine($"{header.Heading} ");
+                Console.WriteLine($"Header: {header.Heading} ");
+                Console.WriteLine($"Page size: { header.PageSize} ");
+                Console.WriteLine($"Read&Write ver: { header.ReadVersion} {header.WriteVersion} ");
             }
             catch (Exception ex)
             {
