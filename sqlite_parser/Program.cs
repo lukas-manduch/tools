@@ -1,5 +1,11 @@
 ﻿namespace SqliteParser
 {
+    static class Constants
+    {
+        public const string SQLITE_HEADER = "SQLite format 3";
+        public const int HEADER_SIZE = 100;
+    }
+
     class Program
     {
         public static void Main(string[] args)
@@ -12,19 +18,7 @@
             
             try
             {
-                byte[] headerBytes = new byte[100];
-
-                using (var fileStream = File.Open(args[0], FileMode.Open))
-                {
-                    using (var binaryReader = new BinaryReader(fileStream))
-                    {
-                        binaryReader.Read(headerBytes, 0, 100);
-                    }
-                }
-                var header = Header.FromBytes(headerBytes);
-                Console.WriteLine($"Header: {header.Heading} ");
-                Console.WriteLine($"Page size: { header.PageSize} ");
-                Console.WriteLine($"Read&Write ver: { header.ReadVersion} {header.WriteVersion} ");
+                DbReader reader = new DbReader(args[0]);
             }
             catch (Exception ex)
             {
