@@ -2,9 +2,9 @@
 
 struct DbHeader
 {
-    private uint _PageSize = 0;
-    public uint PageSize
-    { 
+    private int _PageSize = 0;
+    public int PageSize
+    {
         get => _PageSize; 
         set
         {
@@ -17,7 +17,7 @@ struct DbHeader
         }
     }
     public string Heading
-    { 
+    {
         get 
         {
             return Constants.SQLITE_HEADER;
