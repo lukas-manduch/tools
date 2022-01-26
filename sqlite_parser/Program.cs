@@ -12,6 +12,21 @@
 
     class Program
     {
+
+        public static void PrintPage(Model.Page page)
+        {
+            Console.WriteLine($"-- Page {page.PageIndex} --");
+            Console.WriteLine($"Free block start {page.FreeBlockStart}");
+            Console.WriteLine($"Cell count {page.CellCount}");
+            Console.WriteLine($"Cell start {page.CellStart}");
+            Console.WriteLine($"Fragmented bytes {page.FragmentedFreeBytes}");
+
+            Console.WriteLine("Cell pointers:");
+            foreach (var pointer in page.CellPointers)
+                Console.WriteLine($"  {pointer.ToString()}");
+
+        }
+
         public static void Main(string[] args)
         {
             if (args.Length != 1)
@@ -19,17 +34,14 @@
                 Console.WriteLine("Wrong number of args. Pass sqlite file as arg 1");
                 Environment.Exit(1);
             }
-            
+
             try
             {
                 DbReader reader = new DbReader(args[0]);
                 Console.WriteLine($"Page size {reader.Header.PageSize}");
-                var page = reader.GetPage(0);
+                PrintPage(reader.GetPage(0));
+                PrintPage(reader.GetPage(1));
 
-                Console.WriteLine($"Free block start {page.FreeBlockStart}");
-                Console.WriteLine($"Cell count {page.CellCount}");
-                Console.WriteLine($"Cell start {page.CellStart}");
-                Console.WriteLine($"Fragmented bytes {page.FragmentedFreeBytes}");
             }
             catch (Exception ex)
             {
