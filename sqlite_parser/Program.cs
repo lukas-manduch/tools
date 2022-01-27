@@ -12,6 +12,13 @@
 
     class Program
     {
+        public static void PrintTableLeaf(Model.TableLeafPage page)
+        {
+            for (int index = 0; index < page.CellCount; index++)
+            {
+                page.GetRow(index);
+            }
+        }
 
         public static void PrintPage(Model.Page page)
         {
@@ -24,7 +31,7 @@
             Console.WriteLine("Cell pointers:");
             foreach (var pointer in page.CellPointers)
                 Console.WriteLine($"  {pointer.ToString()}");
-
+            PrintTableLeaf((Model.TableLeafPage)page);
         }
 
         public static void Main(string[] args)

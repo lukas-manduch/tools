@@ -24,7 +24,6 @@ class Helpers
     {
         if (sqlBytes == null || sqlBytes.Length != 2)
         {
-            Console.WriteLine($"Size is {sqlBytes.Length}");
             throw new ArgumentException(nameof(sqlBytes), "Must be exactly 2 bytes");
         }
         if (BitConverter.IsLittleEndian == false)
@@ -44,5 +43,32 @@ class Helpers
         if (position != -1)
             sqlString = sqlString[0..position];
         return System.Text.Encoding.UTF8.GetString(sqlString);
+    }
+
+
+    /// <summary>
+    /// Read varint from given byte array.  Returns it's value and length
+    /// </summary>
+    public static (Int64 Value, ushort Length) ParseVarint(byte[] varint)
+    {
+        byte overflowFlag = 0x80; // 1000 0000
+        UInt32 result = 0;
+        const ushort one = 1;
+        for (ushort i = 0; i < 8; i++)
+        {
+            if (varint.Length == i)
+            {
+                // We can't index here anymore
+                return (Value: result, Length: (ushort)(i+1));
+            }
+            result = result << 7;
+            result = result | (varint[i] & 0x7Fu);
+            if ((overflowFlag & varint[i]) == 0)
+            {
+                // This is last entry
+                return (Value: result, Length: (ushort)(i+1));
+            }
+        }
+        throw new InvalidOperationException("9 byte varint not implemented");
     }
 }
