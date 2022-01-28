@@ -1,4 +1,6 @@
 ﻿namespace SqliteParser;
+using SqliteParser.Model;
+
 class Helpers
 {
     public static UInt32 ParseU32(byte[] sqlBytes)
@@ -49,14 +51,13 @@ class Helpers
     /// <summary>
     /// Read varint from given byte array.  Returns it's value and length
     /// </summary>
-    public static (Int64 Value, ushort Length) ParseVarint(byte[] varint)
+    public static (UInt64 Value, ushort Length) ParseVarint(IList<byte> varint)
     {
         byte overflowFlag = 0x80; // 1000 0000
         UInt32 result = 0;
-        const ushort one = 1;
         for (ushort i = 0; i < 8; i++)
         {
-            if (varint.Length == i)
+            if (varint.Count == i)
             {
                 // We can't index here anymore
                 return (Value: result, Length: (ushort)(i+1));

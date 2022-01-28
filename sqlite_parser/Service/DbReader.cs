@@ -11,6 +11,7 @@ class DbReader
         _fileName = System.IO.Path.GetFullPath(fileName);
         _fileInfo = new FileInfo(_fileName);
         parseHeader();
+        // TODO: Assert that no db extensions are enabled
     }
 
 

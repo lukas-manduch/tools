@@ -16,7 +16,7 @@
         {
             for (int index = 0; index < page.CellCount; index++)
             {
-                page.GetRow(index);
+                page.GetCell(index);
             }
         }
 
