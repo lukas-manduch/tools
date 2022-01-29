@@ -72,4 +72,54 @@ class Helpers
         }
         throw new InvalidOperationException("9 byte varint not implemented");
     }
+
+    public static CellEntry ParseCellEntry(IList<byte> bytes)
+    {
+        var header = ParseVarint(bytes);
+        byte[] payload = bytes.Skip(header.Length).ToArray();
+
+        string value = header.Value switch
+        {
+            _ => header.Value.ToString(),
+        };
+
+        var valLength = 0;
+
+        if (header.Value == 1)
+        {
+            valLength = 1;
+        }
+        else if (header.Value == 2)
+        {
+            valLength = 2;
+        }
+        else if ((header.Value % 2 == 1) && (header.Value >= 13))
+        {
+            valLength = (int)(header.Value - 13) / 2;
+            value = System.Text.Encoding.UTF8.GetString(payload[..valLength]);
+        }
+        else if ((header.Value % 2 == 0) && (header.Value >= 12))
+        {
+            valLength = (int)(header.Value - 12) / 2;
+            value = System.Text.Encoding.UTF8.GetString(payload);
+        }
+        else if (header.Value == 0)
+        {
+            valLength = 1;
+        }
+        else
+        {
+            throw new ArgumentException($"This is f up {header.Value}");
+        }
+
+
+        return new CellEntry()
+        {
+            Value = value,
+            Raw = payload,
+            Varint = header.Value,
+            Size = header.Length + valLength,
+            Type = "Idk"
+        };
+    }
 }
