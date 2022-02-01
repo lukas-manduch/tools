@@ -24,6 +24,7 @@ class DbReader
         {
             Heading = Helpers.ParseU8Str(headerBytes[0..16]),
             PageSize = Helpers.ParseU16(headerBytes[16..18]),
+            PageCount = Helpers.ParseU32(headerBytes[28..32]),
             WriteVersion = headerBytes[18],
             ReadVersion = headerBytes[19]
         };

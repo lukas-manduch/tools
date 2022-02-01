@@ -49,9 +49,12 @@
             {
                 DbReader reader = new DbReader(args[0]);
                 Console.WriteLine($"Page size {reader.Header.PageSize}");
-                PrintPage(reader.GetPage(0));
-                PrintPage(reader.GetPage(1));
-
+                Console.WriteLine($"Page Count {reader.Header.PageCount}");
+                for (uint i = 0; i < reader.Header.PageCount; i++)
+                {
+                    PrintPage(reader.GetPage(i));
+                    Console.WriteLine();
+                }
             }
             catch (Exception ex)
             {

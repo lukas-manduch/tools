@@ -1,3 +1,17 @@
  CREATE TABLE ahojtable (
     id integer PRIMARY KEY,
-    name varchar )
+    name varchar );
+ 
+    CREATE TABLE users (
+        id integer PRIMARY KEY,
+        email varchar,
+        age int NOT NULL
+    );
+
+    INSERT INTO users (email, age) VALUES
+    ('jozo@example.com', 22),
+    ('matko@example.com', 23),
+    ('rudolph@example.com', 33);
+
+    INSERT INTO users (email, age) VALUES
+    ('mrbigage@example.com', 226);

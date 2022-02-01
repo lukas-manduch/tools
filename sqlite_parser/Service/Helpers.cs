@@ -163,6 +163,15 @@ class Helpers
                     };
                     payloadOffset += 1;
                     break;
+                case 2:
+                    current = new()
+                    {
+                        Value = Helpers.ParseU16(payload.Skip(payloadOffset).Take(2).ToArray()).ToString(),
+                        ValueType = "WORD",
+                        HeaderValue = entryType.Value,
+                    };
+                    payloadOffset += 2;
+                    break;
                 case (>= 13) when (entryType.Value % 2 == 1):
                     int stringLength = (int) (entryType.Value -13 ) / 2;
                     byte[] stringPayload = payload.Skip(payloadOffset).Take(stringLength).ToArray();
