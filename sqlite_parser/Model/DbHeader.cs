@@ -30,6 +30,7 @@ struct DbHeader
             }
         }
     }
+    public uint PageCount;
     public byte WriteVersion;
     public byte ReadVersion;
 }
