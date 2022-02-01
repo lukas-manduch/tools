@@ -69,9 +69,10 @@ class DbReader
             
             case Constants.SQLITE_HEADER_TABLE_LEAF:
                 return new TableLeafPage(data, index);
+            case Constants.SQLITE_HEADER_TABLE_INTERNAL:
+                return new TableInteriorPage(data, index);
             case Constants.SQLITE_HEADER_INDEX_INTERNAL:
             case Constants.SQLITE_HEADER_INDEX_LEAF:
-            case Constants.SQLITE_HEADER_TABLE_INTERNAL:
             default:
                 throw new ArgumentException("GetPage", $"Page[{index}] seems corrupted, type {data[0]}");
         }
