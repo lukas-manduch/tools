@@ -16,7 +16,12 @@
         {
             for (int index = 0; index < page.CellCount; index++)
             {
-                page.GetCell(index);
+                var cell = page.GetCell(index);
+                Console.WriteLine($" {page.CellPointers[index].ToString()} - RowID {cell.RowID}");
+                foreach (var entry in cell.Entries)
+                {
+                    Console.WriteLine($"  {entry}");
+                }
             }
         }
 
@@ -27,10 +32,8 @@
             Console.WriteLine($"Cell count {page.CellCount}");
             Console.WriteLine($"Cell start {page.CellStart}");
             Console.WriteLine($"Fragmented bytes {page.FragmentedFreeBytes}");
+            Console.WriteLine($"Cell pointers count: {page.CellPointers.Count}");
 
-            Console.WriteLine("Cell pointers:");
-            foreach (var pointer in page.CellPointers)
-                Console.WriteLine($"  {pointer.ToString()}");
             PrintTableLeaf((Model.TableLeafPage)page);
         }
 

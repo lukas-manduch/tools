@@ -1,5 +1,7 @@
 ﻿namespace SqliteParser;
 using SqliteParser.Model;
+using System.Collections.Generic;
+using System.Diagnostics;
 
 class Helpers
 {
@@ -51,7 +53,7 @@ class Helpers
     /// <summary>
     /// Read varint from given byte array.  Returns it's value and length
     /// </summary>
-    public static (UInt64 Value, ushort Length) ParseVarint(IList<byte> varint)
+    public static (UInt64 Value, ushort Length) ParseVarint(IReadOnlyList<byte> varint)
     {
         byte overflowFlag = 0x80; // 1000 0000
         UInt32 result = 0;
@@ -73,53 +75,114 @@ class Helpers
         throw new InvalidOperationException("9 byte varint not implemented");
     }
 
-    public static CellEntry ParseCellEntry(IList<byte> bytes)
+    public static (string Value, string Type) ParseCellEntry(uint type, IReadOnlyList<byte> payload)
     {
-        var header = ParseVarint(bytes);
-        byte[] payload = bytes.Skip(header.Length).ToArray();
+        throw new InvalidOperationException("Uncoded");
+        return ("","");
+        //var header = ParseVarint(bytes);
+        //byte[] payload = bytes.Skip(header.Length).ToArray();
 
-        string value = header.Value switch
-        {
-            _ => header.Value.ToString(),
-        };
+        //string value = header.Value switch
+        //{
+        //    _ => header.Value.ToString(),
+        //};
 
-        var valLength = 0;
+        //var valLength = 0;
 
-        if (header.Value == 1)
-        {
-            valLength = 1;
-        }
-        else if (header.Value == 2)
-        {
-            valLength = 2;
-        }
-        else if ((header.Value % 2 == 1) && (header.Value >= 13))
-        {
-            valLength = (int)(header.Value - 13) / 2;
-            value = System.Text.Encoding.UTF8.GetString(payload[..valLength]);
-        }
-        else if ((header.Value % 2 == 0) && (header.Value >= 12))
-        {
-            valLength = (int)(header.Value - 12) / 2;
-            value = System.Text.Encoding.UTF8.GetString(payload);
-        }
-        else if (header.Value == 0)
-        {
-            valLength = 1;
-        }
-        else
-        {
-            throw new ArgumentException($"This is f up {header.Value}");
-        }
+        //if (header.Value == 1)
+        //{
+        //    valLength = 1;
+        //}
+        //else if (header.Value == 2)
+        //{
+        //    valLength = 2;
+        //}
+        //else if ((header.Value % 2 == 1) && (header.Value >= 13))
+        //{
+        //    valLength = (int)(header.Value - 13) / 2;
+        //    value = System.Text.Encoding.UTF8.GetString(payload[..valLength]);
+        //}
+        //else if ((header.Value % 2 == 0) && (header.Value >= 12))
+        //{
+        //    valLength = (int)(header.Value - 12) / 2;
+        //    value = System.Text.Encoding.UTF8.GetString(payload);
+        //}
+        //else if (header.Value == 0)
+        //{
+        //    valLength = 1;
+        //}
+        //else
+        //{
+        //    throw new ArgumentException($"This is f up {header.Value}");
+        //}
 
+        //throw new Exception("Not needed here");
+        //return new CellEntry()
+        //{
+        //    //Value = value,
+        //    //Raw = payload,
+        //    //Varint = header.Value,
+        //    //Size = header.Length + valLength,
+        //    //ValueType = "Idk"
+        //};
+    }
 
-        return new CellEntry()
+    public static List<CellEntry> ParseCellPayload(IReadOnlyList<byte> payload)
+    {
+        var headerSize = Helpers.ParseVarint(payload);
+
+        byte[] header = payload.Skip(headerSize.Length).Take((int)(headerSize.Value - headerSize.Length)).ToArray();
+
+        
+        List<CellEntry> result = new();
+        
+        int hearderIndex = 0;
+        int payloadOffset = (int)headerSize.Value;
+        
+        while(hearderIndex < header.Length)
         {
-            Value = value,
-            Raw = payload,
-            Varint = header.Value,
-            Size = header.Length + valLength,
-            Type = "Idk"
-        };
+            var entryType = Helpers.ParseVarint(header[hearderIndex..]);
+            CellEntry current;
+
+            switch (entryType.Value)
+            {
+                case 0:
+                    current = new()
+                    {
+                        HeaderValue = entryType.Value,
+                        Value = "0",
+                        ValueType = "NULL"
+                    };
+                    break;
+                case 1:
+                    current = new()
+                    {
+                        Value = payload[payloadOffset].ToString(),
+                        ValueType = "byte",
+                        HeaderValue = entryType.Value,
+                    };
+                    payloadOffset += 1;
+                    break;
+                case (>= 13) when (entryType.Value % 2 == 1):
+                    int stringLength = (int) (entryType.Value -13 ) / 2;
+                    byte[] stringPayload = payload.Skip(payloadOffset).Take(stringLength).ToArray();
+                    current = new()
+                    {
+                        ValueType = "string",
+                        Value = System.Text.Encoding.UTF8.GetString(stringPayload),
+                        HeaderValue = entryType.Value,
+                        Raw = stringPayload
+                    };
+                    payloadOffset += stringLength;
+                    break;
+                default:
+                    throw new ArgumentException($"Parse cell failed, unknown type {entryType.Value}");
+            }
+            Debug.Assert(current is not null);
+
+            hearderIndex += entryType.Length;
+            result.Add(current);
+        }
+        return result;
     }
 }

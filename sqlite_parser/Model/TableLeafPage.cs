@@ -20,11 +20,13 @@ class Cell
         {
             throw new ArgumentException("Overflown cell, not implemented");
         }
-        Console.WriteLine(System.Text.Encoding.UTF8.GetString(Data.ToArray()));
+        Entries = Helpers.ParseCellPayload(Data);
     }
 
     public UInt64 RowID;
     public List<byte> Data;
+    public List<CellEntry> Entries;
+
 }
 
 class TableLeafPage : Page
@@ -54,6 +56,6 @@ class TableLeafPage : Page
             return new(Data[CellPointers[index]..]);
         }
         // We return
-        return new(Data[sorted[position]..sorted[position+1]]);
+        return new Cell(Data[sorted[position]..sorted[position+1]]);
     }
 }
