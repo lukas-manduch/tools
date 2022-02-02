@@ -16,7 +16,7 @@
         {
             for (int index = 0; index < page.CellCount; index++)
             {
-                var cell = page.GetCell(index);
+                var cell = (Model.TableLeafCell)page.GetCell(index);
                 Console.WriteLine($" {page.CellPointers[index].ToString()} - RowID {cell.RowID}");
                 foreach (var entry in cell.Entries)
                 {
@@ -53,6 +53,7 @@
                 {
                     Constants.SQLITE_HEADER_TABLE_LEAF => "Table leaf",
                     Constants.SQLITE_HEADER_TABLE_INTERNAL => "Table internal",
+                    _ => "ERROR (unrecognized/not implemented)"
                 };
                 Console.WriteLine($"[{i}] - ({page.PageType}) {pageDesc}");
             }
