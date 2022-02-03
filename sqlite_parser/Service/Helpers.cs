@@ -77,7 +77,7 @@ class Helpers
 
     public static List<CellEntry> ParseTableLeafCellPayload(IReadOnlyList<byte> payload)
     {
-        var headerSize = Helpers.ParseVarint(payload);
+        var headerSize = ParseVarint(payload);
 
         byte[] header = payload.Skip(headerSize.Length).Take((int)(headerSize.Value - headerSize.Length)).ToArray();
 
@@ -89,7 +89,7 @@ class Helpers
         
         while(hearderIndex < header.Length)
         {
-            var entryType = Helpers.ParseVarint(header[hearderIndex..]);
+            var entryType = ParseVarint(header[hearderIndex..]);
             CellEntry current;
 
             switch (entryType.Value)
@@ -114,7 +114,7 @@ class Helpers
                 case 2:
                     current = new()
                     {
-                        Value = Helpers.ParseU16(payload.Skip(payloadOffset).Take(2).ToArray()).ToString(),
+                        Value = ParseU16(payload.Skip(payloadOffset).Take(2).ToArray()).ToString(),
                         ValueType = "WORD",
                         HeaderValue = entryType.Value,
                     };
@@ -136,7 +136,6 @@ class Helpers
                     throw new ArgumentException($"Parse cell failed, unknown type {entryType.Value}");
             }
             Debug.Assert(current is not null);
-
             hearderIndex += entryType.Length;
             result.Add(current);
         }

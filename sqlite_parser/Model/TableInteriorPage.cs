@@ -6,5 +6,10 @@ class TableInteriorPage : Page
 	{
 
 	}
+	public override Cell GetCell(int index)
+	{
+		return new TableInteriorCell(GetCellInternal(index));
+	}
+
 }
 

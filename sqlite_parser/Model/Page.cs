@@ -22,7 +22,16 @@ internal class Page
         get
         {
             // These are codes for interior pages
-            return PageType == 2 || PageType == 5;
+            return PageType == Constants.SQLITE_HEADER_TABLE_INTERNAL;
+        }
+    }
+    public UInt32 RightmostPointer
+    {
+        get
+        {
+            if (!HasRightmostPointer)
+                throw new InvalidOperationException("Page type doesn't have righmost pointer");
+            return Helpers.ParseU32(StartData[8..12]);
         }
     }
     public List<UInt16> CellPointers
@@ -31,9 +40,9 @@ internal class Page
         {
             byte[] data;
             List<UInt16> result = new();
+            data = StartData[8..(8 + CellCount*2)];
             if (HasRightmostPointer)
                 data = StartData[12..(12 + CellCount*2)];
-            data = StartData[8..(8 + CellCount*2)];
             Debug.Assert((data.Length % 2) == 0);
             for (int i = 0; i < data.Length; i += 2)
             {

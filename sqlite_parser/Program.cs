@@ -17,7 +17,7 @@
             for (int index = 0; index < page.CellCount; index++)
             {
                 var cell = (Model.TableLeafCell)page.GetCell(index);
-                Console.WriteLine($" {page.CellPointers[index].ToString()} - RowID {cell.RowID}");
+                Console.WriteLine($" &{page.CellPointers[index].ToString()} - RowID {cell.RowID}");
                 foreach (var entry in cell.Entries)
                 {
                     Console.WriteLine($"  {entry}");
@@ -27,6 +27,11 @@
 
         public static void PrintTableInterior(Model.TableInteriorPage page)
         {
+            for (int index = 0; index < page.CellCount; index++)
+            {
+                var cell = (Model.TableInteriorCell)page.GetCell(index);
+                Console.WriteLine($" &{page.CellPointers[index].ToString()} - RowID {cell.RowID} Pointer {cell.PagePointer}");
+            }
         }
 
 
@@ -37,6 +42,8 @@
             Console.WriteLine($"Cell start {page.CellStart}");
             Console.WriteLine($"Fragmented bytes {page.FragmentedFreeBytes}");
             Console.WriteLine($"Cell pointers count: {page.CellPointers.Count}");
+            if (page.HasRightmostPointer)
+                Console.WriteLine($"Rightmost pointer: {page.RightmostPointer} ");
 
             if (page.PageType == Constants.SQLITE_HEADER_TABLE_LEAF)
                 PrintTableLeaf((Model.TableLeafPage)page);
