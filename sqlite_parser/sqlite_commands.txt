@@ -273,3 +273,19 @@
   ("Keely Stanley",37),
   ("Cameron Mcleod",71),
   ("Jamal Walsh",62);
+
+
+  Create table orders  (
+    id integer PRIMARY KEY,
+    price integer,
+    date integer,
+    userid integer NOT NULL,
+    FOREIGN KEY(userid) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE
+  );
+
+  INSERT INTO orders (price, date, userid) VALUES
+  (100, datetime('2021-04-29 09:32'), 17);
+
+  select * from users  INNER JOIN orders on users.id = orders.userid WHERE users.id=17;
+
+

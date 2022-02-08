@@ -58,7 +58,7 @@ internal class Page
         Data = pageBytes;
         PageIndex = index;
         StartData = pageBytes;
-        if (index == 0)
+        if (index == 1)
             StartData = pageBytes[100..];
     }
 

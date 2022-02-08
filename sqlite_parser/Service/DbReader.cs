@@ -25,6 +25,7 @@ class DbReader
             Heading = Helpers.ParseU8Str(headerBytes[0..16]),
             PageSize = Helpers.ParseU16(headerBytes[16..18]),
             PageCount = Helpers.ParseU32(headerBytes[28..32]),
+            FreeListPage = Helpers.ParseU32(headerBytes[32..36]),
             WriteVersion = headerBytes[18],
             ReadVersion = headerBytes[19]
         };
@@ -58,10 +59,14 @@ class DbReader
 
     public Page GetPage(uint index)
     {
+        if (index == 0 || index > Header.PageCount)
+            throw new ArgumentOutOfRangeException(nameof(index));
+        
         byte[] data;
-        data = ReadBytes((int) (Header.PageSize*index), (int) (Header.PageSize*(index+1)));
+        data = ReadBytes((int) (Header.PageSize*(index-1)), (int) (Header.PageSize*(index)));
         int offset = 0;
-        if (index == 0)
+
+        if (index == 1)
             offset = 100;
 
         switch (data[offset])
@@ -76,7 +81,6 @@ class DbReader
             default:
                 throw new ArgumentException("GetPage", $"Page[{index}] seems corrupted, type {data[0]}");
         }
-
     }
 
     private string _fileName;

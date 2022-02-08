@@ -53,7 +53,7 @@
 
         public static void PrintPages(DbReader reader)
         {
-            for (uint i = 0; i < reader.Header.PageCount; i++)
+            for (uint i = 1; i <= reader.Header.PageCount; i++)
             {
                 var page = reader.GetPage(i);
                 string pageDesc = page.PageType switch
@@ -79,6 +79,7 @@
                 DbReader reader = new DbReader(args[0]);
                 Console.WriteLine($"Page size {reader.Header.PageSize}");
                 Console.WriteLine($"Page Count {reader.Header.PageCount}");
+                Console.WriteLine($"Free list page {reader.Header.FreeListPage}");
                 Console.WriteLine();
                 while (true)
                 {

@@ -30,8 +30,10 @@ struct DbHeader
             }
         }
     }
+    public uint FreeListPage;
     public uint PageCount;
     public byte WriteVersion;
     public byte ReadVersion;
+
 }
 
