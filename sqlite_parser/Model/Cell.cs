@@ -30,6 +30,8 @@ class TableLeafCell : Cell
             throw new ArgumentException("Overflown cell, not implemented");
         }
         Entries = Helpers.ParseTableLeafCellPayload(PayloadData);
+    }
+
     public static int GetSize(ReadOnlySpan<byte> data)
     {
         var payloadVarint = Helpers.ParseVarint(data);
