@@ -30,6 +30,11 @@ class TableLeafCell : Cell
             throw new ArgumentException("Overflown cell, not implemented");
         }
         Entries = Helpers.ParseTableLeafCellPayload(PayloadData);
+    public static int GetSize(ReadOnlySpan<byte> data)
+    {
+        var payloadVarint = Helpers.ParseVarint(data);
+        var rowVarint = Helpers.ParseVarint(data.Slice(payloadVarint.Length));
+        return payloadVarint.Length + rowVarint.Length + (int)payloadVarint.Value;
     }
 
     public UInt64 RowID;
@@ -43,9 +48,14 @@ class TableInteriorCell : Cell
         : base(data)
     {
         // DWORD + VARINT
-        Debug.Assert(data.Length < (4 + 9));
+        Debug.Assert(data.Length < (4 + 9), $"too big cell {data.Length}");
         PagePointer = Helpers.ParseU32(data[0..4]);
-        RowID = Helpers.ParseVarint(data[4..].ToList()).Value;
+        RowID = Helpers.ParseVarint(data[4..]).Value;
+    }
+
+    public static int GetSize(ReadOnlySpan<byte> data)
+    {
+        return 4 + Helpers.ParseVarint(data.Slice(4)).Length;
     }
     public UInt32 PagePointer;
     public UInt64 RowID;

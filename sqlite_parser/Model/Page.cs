@@ -71,23 +71,35 @@ internal class Page
         throw new NotImplementedException();
     }
 
+    protected virtual int GetCellSize(ReadOnlySpan<byte> data)
+    {
+        throw new NotImplementedException("Operation not supported");
+    }
+    
+
     protected byte[] GetCellInternal(int index)
     {
         Debug.Assert(index < CellCount);
+        var cellAddress = CellPointers[index];
+        // Memory from cell start till the end
+        Span<byte> cellSlice = Data.AsSpan(cellAddress);
+        int cellSize = GetCellSize(cellSlice);
+        Debug.Assert(cellSize > 0);
+        return Data[cellAddress..(cellAddress + cellSize)];
 
         // We have to find nearest bigger index
-        var sorted = CellPointers.ToArray();
-        Array.Sort(sorted, (a, b) => a.CompareTo(b));  // Ascending sort
-        int position = Array.BinarySearch(sorted, CellPointers[index]);
-        Debug.Assert(position >= 0); // We didn't find ourselves?
-        if (position == (CellCount - 1))
-        {
-            // This is last cell, so till the end. There could be extension data
-            // but we don't support that scenario. So we would fail somewhere
-            return Data[CellPointers[index]..];
-        }
-        // We return
-        return Data[sorted[position]..sorted[position + 1]];
+        //var sorted = CellPointers.ToArray();
+        //Array.Sort(sorted, (a, b) => a.CompareTo(b));  // Ascending sort
+        //int position = Array.BinarySearch(sorted, CellPointers[index]);
+        //Debug.Assert(position >= 0); // We didn't find ourselves?
+        //if (position == (CellCount - 1))
+        //{
+        //    // This is last cell, so till the end. There could be extension data
+        //    // but we don't support that scenario. So we would fail somewhere
+        //    return Data[CellPointers[index]..];
+        //}
+        //// We return
+        //return Data[sorted[position]..sorted[position + 1]];
     }
 
     private byte[] StartData;

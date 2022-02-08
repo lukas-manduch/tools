@@ -51,15 +51,42 @@ class Helpers
 
 
     /// <summary>
+    /// Read varint from given byte enumerable.  Returns it's value and length
+    /// </summary>
+    public static (UInt64 Value, ushort Length) ParseVarint(IEnumerable<byte> varint)
+    {
+        const byte overflowFlag = 0x80; // 1000 0000
+        int index = 0;
+        UInt64 value = 0;
+        List<byte> bs = new();
+        foreach (byte b in varint)
+        {
+            if (index == 8)
+                throw new ArgumentException("Varint is supported only up to 8 bytes");
+
+            bs.Add((byte)(b & (~overflowFlag)));
+            index++;
+            if ((b & overflowFlag) == 0)
+                break;
+        }
+        bs.Reverse();
+        for (int i = 0; i < bs.Count; i++)
+        {
+            value |= (UInt64)bs[i] << (7 * i);
+        }
+        return (Value: value, Length: (ushort)bs.Count);
+    }
+
+    /// <summary>
     /// Read varint from given byte array.  Returns it's value and length
     /// </summary>
-    public static (UInt64 Value, ushort Length) ParseVarint(IReadOnlyList<byte> varint)
+    public static (UInt64 Value, ushort Length) ParseVarint(ReadOnlySpan<byte> varint)
     {
-        byte overflowFlag = 0x80; // 1000 0000
+        const byte overflowFlag = 0x80; // 1000 0000
         UInt32 result = 0;
         for (ushort i = 0; i < 8; i++)
         {
-            if (varint.Count == i)
+            if (varint.Length == i)
             {
                 // We can't index here anymore
                 return (Value: result, Length: (ushort)(i+1));
@@ -74,6 +101,12 @@ class Helpers
         }
         throw new InvalidOperationException("9 byte varint not implemented");
     }
+
+    public static (UInt64 Value, ushort Length) ParseVarint(byte[] varint)
+    {
+        return Helpers.ParseVarint((ReadOnlySpan<byte>)varint);
+    }
+
 
     public static List<CellEntry> ParseTableLeafCellPayload(IReadOnlyList<byte> payload)
     {

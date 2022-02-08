@@ -11,5 +11,9 @@ class TableInteriorPage : Page
 		return new TableInteriorCell(GetCellInternal(index));
 	}
 
+    protected override int GetCellSize(ReadOnlySpan<byte> data)
+    {
+        return TableInteriorCell.GetSize(data);
+    }
 }
 
