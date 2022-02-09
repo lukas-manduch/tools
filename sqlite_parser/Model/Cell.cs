@@ -29,7 +29,7 @@ class TableLeafCell : Cell
         {
             throw new ArgumentException("Overflown cell, not implemented");
         }
-        Entries = Helpers.ParseTableLeafCellPayload(PayloadData);
+        Entries = Helpers.ParseLeafCellPayload(PayloadData);
     }
 
     public static int GetSize(ReadOnlySpan<byte> data)
@@ -61,4 +61,33 @@ class TableInteriorCell : Cell
     }
     public UInt32 PagePointer;
     public UInt64 RowID;
+}
+
+class IndexLeafCell : Cell
+{
+    public IndexLeafCell(byte[] data)
+        :base(data)
+    {
+        var headerSizeVarint = Helpers.ParseVarint(data);
+
+
+        List<byte> b = data
+            .AsSpan()
+            .Slice(headerSizeVarint.Length, (int)headerSizeVarint.Value)
+            .ToArray() // Idk how to avoid this step
+            .ToList();
+
+        CellSize = (int)headerSizeVarint.Value;
+        Entries = Helpers.ParseLeafCellPayload(b);
+    }
+
+    public static int GetSize(ReadOnlySpan<byte> data)
+    {
+        var varint = Helpers.ParseVarint(data);
+        // Sizeof varint + sizeof payload
+        return varint.Length + (int)varint.Value;
+    }
+
+    public int CellSize;
+    public List<CellEntry> Entries = new();
 }

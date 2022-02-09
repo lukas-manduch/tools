@@ -34,6 +34,20 @@
             }
         }
 
+        public static void PrintIndexLeafPage(Model.IndexLeafPage page)
+        {
+            for (int index = 0; index < page.CellCount; index++)
+            {
+                var cell = (Model.IndexLeafCell)page.GetCell(index);
+                Console.WriteLine($" &{page.CellPointers[index].ToString()} - {cell.CellSize}");
+                foreach (var entry in cell.Entries)
+                {
+                    Console.WriteLine($"  {entry}");
+                }
+
+            }
+        }
+
 
         public static void PrintPage(Model.Page page)
         {           Console.WriteLine($"-- Page {page.PageIndex} --");
@@ -49,6 +63,8 @@
                 PrintTableLeaf((Model.TableLeafPage)page);
             if (page.PageType == Constants.SQLITE_HEADER_TABLE_INTERNAL)
                 PrintTableInterior((Model.TableInteriorPage)page);
+            if (page.PageType == Constants.SQLITE_HEADER_INDEX_LEAF)
+                PrintIndexLeafPage((Model.IndexLeafPage)page);
         }
 
         public static void PrintPages(DbReader reader)
@@ -60,6 +76,7 @@
                 {
                     Constants.SQLITE_HEADER_TABLE_LEAF => "Table leaf",
                     Constants.SQLITE_HEADER_TABLE_INTERNAL => "Table internal",
+                    Constants.SQLITE_HEADER_INDEX_LEAF => "Index leaf",
                     _ => "ERROR (unrecognized/not implemented)"
                 };
                 Console.WriteLine($"[{i}] - ({page.PageType}) {pageDesc}");

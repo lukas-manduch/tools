@@ -1,4 +1,6 @@
- CREATE TABLE ahojtable (
+PRAGMA page_size=512;
+
+CREATE TABLE ahojtable (
     id integer PRIMARY KEY,
     name varchar );
  
@@ -286,6 +288,9 @@
   INSERT INTO orders (price, date, userid) VALUES
   (100, datetime('2021-04-29 09:32'), 17);
 
-  select * from users  INNER JOIN orders on users.id = orders.userid WHERE users.id=17;
+  select * from users
+   INNER JOIN orders on users.id = orders.userid
+   WHERE users.id=17;
 
 
+    CREATE INDEX if not exists nameonage35plus on users (email) where age > 35; 
