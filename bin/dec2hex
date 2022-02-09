@@ -34,12 +34,14 @@ if __name__ == "__main__":
         while True:
             char = sys.stdin.read(1)
             if not char:
+                print()
                 sys.exit(0)
             if char.isspace() and char_list:
                 try:
                     flush(char_list)
                     char_list.clear()
                 except Exception as e:
+                    print()
                     print(e)
                     exit(1)
             else:
