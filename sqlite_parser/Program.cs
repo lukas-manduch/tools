@@ -107,6 +107,13 @@
 
             try
             {
+                Helpers.FileType ft = Helpers.DetectFileFormat(args[0]);
+                if (ft != Helpers.FileType.Database)
+                {
+                    Console.WriteLine("Wrong file format");
+                    Environment.Exit(1);
+                }
+
                 DbReader reader = new DbReader(args[0]);
                 Console.WriteLine($"Page size {reader.Header.PageSize}");
                 Console.WriteLine($"Page Count {reader.Header.PageCount}");

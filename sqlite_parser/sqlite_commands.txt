@@ -1,4 +1,5 @@
 PRAGMA page_size=512;
+PRAGMA journal_mode=WAL;
 
 CREATE TABLE ahojtable (
     id integer PRIMARY KEY,

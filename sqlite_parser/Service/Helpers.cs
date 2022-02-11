@@ -3,6 +3,7 @@ using SqliteParser.Model;
 using System.Collections.Generic;
 using System.Diagnostics;
 
+
 class Helpers
 {
     public static UInt32 ParseU32(ReadOnlySpan<byte> sqlBytes)
@@ -181,5 +182,37 @@ class Helpers
             result.Add(current);
         }
         return result;
+    }
+
+    public enum FileType
+    {
+        Database,
+        WAL,
+        Empty,
+        Unknown
+    }
+
+
+    public static FileType DetectFileFormat(string filePath)
+    {
+        var reader = new Service.FileReader(filePath);
+        // Check minimal size
+        if (reader.FileSize == 0)
+            return FileType.Empty;
+        if (reader.FileSize < 32)
+            return FileType.Unknown;
+        byte[] data = reader.ReadBytes(0, 15);
+
+        // Check for WAL magic numbers
+        UInt32 header1 = Helpers.ParseU32(data[0..4]);
+        if (header1 == 0x377f0682 || header1 == 0x377f0683)
+            return FileType.WAL;
+
+        // Check for sqlite magic string
+        string header2 = System.Text.Encoding.ASCII.GetString(data);
+        if (header2 == Constants.SQLITE_HEADER)
+            return FileType.Database;
+
+        return FileType.Unknown;
     }
 }
