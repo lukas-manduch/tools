@@ -293,4 +293,9 @@ CREATE TABLE ahojtable (
    WHERE users.id=17;
 
 
-    CREATE INDEX if not exists nameonage35plus on users (email) where age > 35; 
+    CREATE INDEX if not exists nameonage35plus on users (email) where age > 35;
+
+
+
+  INSERT INTO users (email, age) VALUES
+    ("ZZZZZ this guy definitely made this name up!!!!! No one can have name that is this long. What should than be inserted in index? It's kinda crazy but db duplicates these strings without any f___s given##",100);

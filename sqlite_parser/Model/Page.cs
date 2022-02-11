@@ -22,7 +22,8 @@ internal class Page
         get
         {
             // These are codes for interior pages
-            return PageType == Constants.SQLITE_HEADER_TABLE_INTERNAL;
+            return (PageType == Constants.SQLITE_HEADER_TABLE_INTERNAL) ||
+                (PageType == Constants.SQLITE_HEADER_INDEX_INTERNAL);
         }
     }
     public UInt32 RightmostPointer

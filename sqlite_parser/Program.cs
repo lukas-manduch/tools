@@ -12,7 +12,7 @@
 
     class Program
     {
-        public static void PrintTableLeaf(Model.TableLeafPage page)
+        public static void PrintTableLeafPage(Model.TableLeafPage page)
         {
             for (int index = 0; index < page.CellCount; index++)
             {
@@ -25,12 +25,12 @@
             }
         }
 
-        public static void PrintTableInterior(Model.TableInteriorPage page)
+        public static void PrintTableInteriorPage(Model.TableInteriorPage page)
         {
             for (int index = 0; index < page.CellCount; index++)
             {
                 var cell = (Model.TableInteriorCell)page.GetCell(index);
-                Console.WriteLine($" &{page.CellPointers[index].ToString()} - RowID {cell.RowID} Pointer {cell.PagePointer}");
+                Console.WriteLine($" &{page.CellPointers[index].ToString()} - RowID {cell.RowID} PageP => {cell.PagePointer}");
             }
         }
 
@@ -39,15 +39,26 @@
             for (int index = 0; index < page.CellCount; index++)
             {
                 var cell = (Model.IndexLeafCell)page.GetCell(index);
-                Console.WriteLine($" &{page.CellPointers[index].ToString()} - {cell.CellSize}");
+                Console.WriteLine($" &{page.CellPointers[index].ToString()}");
                 foreach (var entry in cell.Entries)
                 {
                     Console.WriteLine($"  {entry}");
                 }
-
             }
         }
 
+        public static void PrintIndexInteriorPage(Model.IndexInteriorPage page)
+        {
+            for (int index = 0; index < page.CellCount; index++)
+            {
+                var cell = (Model.IndexInteriorCell)page.GetCell(index);
+                Console.WriteLine($" &{page.CellPointers[index].ToString()} - PageP => {cell.LeftChildPointer}");
+                foreach (var entry in cell.Entries)
+                {
+                    Console.WriteLine($"  {entry}");
+                }
+            }
+        }
 
         public static void PrintPage(Model.Page page)
         {           Console.WriteLine($"-- Page {page.PageIndex} --");
@@ -60,11 +71,13 @@
                 Console.WriteLine($"Rightmost pointer: {page.RightmostPointer} ");
 
             if (page.PageType == Constants.SQLITE_HEADER_TABLE_LEAF)
-                PrintTableLeaf((Model.TableLeafPage)page);
+                PrintTableLeafPage((Model.TableLeafPage)page);
             if (page.PageType == Constants.SQLITE_HEADER_TABLE_INTERNAL)
-                PrintTableInterior((Model.TableInteriorPage)page);
+                PrintTableInteriorPage((Model.TableInteriorPage)page);
             if (page.PageType == Constants.SQLITE_HEADER_INDEX_LEAF)
                 PrintIndexLeafPage((Model.IndexLeafPage)page);
+            if (page.PageType == Constants.SQLITE_HEADER_INDEX_INTERNAL)
+                PrintIndexInteriorPage((Model.IndexInteriorPage)page);
         }
 
         public static void PrintPages(DbReader reader)
@@ -75,8 +88,9 @@
                 string pageDesc = page.PageType switch
                 {
                     Constants.SQLITE_HEADER_TABLE_LEAF => "Table leaf",
-                    Constants.SQLITE_HEADER_TABLE_INTERNAL => "Table internal",
+                    Constants.SQLITE_HEADER_TABLE_INTERNAL => "Table interior page",
                     Constants.SQLITE_HEADER_INDEX_LEAF => "Index leaf",
+                    Constants.SQLITE_HEADER_INDEX_INTERNAL => "Index interior page",
                     _ => "ERROR (unrecognized/not implemented)"
                 };
                 Console.WriteLine($"[{i}] - ({page.PageType}) {pageDesc}");

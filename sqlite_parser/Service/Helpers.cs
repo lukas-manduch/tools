@@ -5,7 +5,7 @@ using System.Diagnostics;
 
 class Helpers
 {
-    public static UInt32 ParseU32(byte[] sqlBytes)
+    public static UInt32 ParseU32(ReadOnlySpan<byte> sqlBytes)
     {
         if (sqlBytes == null || sqlBytes.Length != 4)
         {
@@ -108,7 +108,7 @@ class Helpers
     }
 
 
-    public static List<CellEntry> ParseTableLeafCellPayload(IReadOnlyList<byte> payload)
+    public static List<CellEntry> ParseLeafCellPayload(IReadOnlyList<byte> payload)
     {
         var headerSize = ParseVarint(payload);
 
@@ -152,6 +152,14 @@ class Helpers
                         HeaderValue = entryType.Value,
                     };
                     payloadOffset += 2;
+                    break;
+                case 9:
+                    current = new()
+                    {
+                        Value = "1",
+                        ValueType = "Type1 (special no data)",
+                        HeaderValue = entryType.Value,
+                    };
                     break;
                 case (>= 13) when (entryType.Value % 2 == 1):
                     int stringLength = (int) (entryType.Value -13 ) / 2;

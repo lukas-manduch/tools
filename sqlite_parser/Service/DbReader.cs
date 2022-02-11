@@ -77,6 +77,7 @@ class DbReader
             case Constants.SQLITE_HEADER_TABLE_INTERNAL:
                 return new TableInteriorPage(data, index);
             case Constants.SQLITE_HEADER_INDEX_INTERNAL:
+                return new IndexInteriorPage(data, index);
             case Constants.SQLITE_HEADER_INDEX_LEAF:
                 return new IndexLeafPage(data, index);
             default:
