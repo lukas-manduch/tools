@@ -28,6 +28,11 @@
                     var interactiveDbBroser = new Service.DbInteractive(args[0]);
                     interactiveDbBroser.Start();
                 }
+                else if (ft == Helpers.FileType.WAL)
+                {
+                    Console.WriteLine("==Write Ahead Log browsing==");
+                    var interactive = new Service.WalInteractive(args[0]);
+                }
                 else
                 {
                     Console.WriteLine("Wrong file format");

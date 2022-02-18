@@ -12,10 +12,6 @@ class Helpers
         {
             throw new ArgumentException(nameof(sqlBytes), "Must be exactly 4 bytes");
         }
-        if (BitConverter.IsLittleEndian == false)
-        {
-            throw new ApplicationException("LE systems not implemented");
-        }
         UInt32 b0 = sqlBytes[0];
         UInt32 b1 = sqlBytes[1];
         UInt32 b2 = sqlBytes[2];
@@ -25,15 +21,26 @@ class Helpers
         return result;
     }
 
-    public static UInt16 ParseU16(byte[] sqlBytes)
+    public static UInt32 ParseU32LE(ReadOnlySpan<byte> sqlBytes)
+    {
+        if (sqlBytes == null || sqlBytes.Length != 4)
+        {
+            throw new ArgumentException(nameof(sqlBytes), "Must be exactly 4 bytes");
+        }
+        UInt32 b0 = sqlBytes[0];
+        UInt32 b1 = sqlBytes[1];
+        UInt32 b2 = sqlBytes[2];
+        UInt32 b3 = sqlBytes[3];
+
+        UInt32 result = (b3 << 24) | (b2 << 16) | (b1 << 8) | b0;
+        return result;
+    }
+
+    public static UInt16 ParseU16(ReadOnlySpan<byte> sqlBytes)
     {
         if (sqlBytes == null || sqlBytes.Length != 2)
         {
             throw new ArgumentException(nameof(sqlBytes), "Must be exactly 2 bytes");
-        }
-        if (BitConverter.IsLittleEndian == false)
-        {
-            throw new ApplicationException("LE systems not implemented");
         }
         UInt32 b0 = sqlBytes[0];
         UInt32 b1 = sqlBytes[1];
@@ -214,5 +221,25 @@ class Helpers
             return FileType.Database;
 
         return FileType.Unknown;
+    }
+
+    public static (UInt32 S0, UInt32 S1)
+        WalChecksum(ReadOnlySpan<byte> data, UInt32 s0, UInt32 s1, bool isBE = false)
+    {
+        Debug.Assert((data.Length % 8) == 0, "Invalid checksum chunk (%8)");
+
+        UInt32 parser(ReadOnlySpan<byte> b)
+        {
+            if (isBE)
+                return ParseU32(b);
+            return ParseU32LE(b);
+        }
+
+        for (int i = 0; i < data.Length; i += 8)
+        {
+            s0 += parser(data.Slice(i, 4)) + s1;
+            s1 += parser(data.Slice(i+4, 4)) + s0;
+        }
+        return (s0,s1);
     }
 }
