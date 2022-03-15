@@ -30,8 +30,8 @@
                 }
                 else if (ft == Helpers.FileType.WAL)
                 {
-                    Console.WriteLine("==Write Ahead Log browsing==");
                     var interactive = new Service.WalInteractive(args[0]);
+                    interactive.Start();
                 }
                 else
                 {

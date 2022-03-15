@@ -2,7 +2,7 @@
 
 struct DbHeader
 {
-    private int _PageSize = 0;
+    private int _PageSize;
     public int PageSize
     {
         get => _PageSize; 

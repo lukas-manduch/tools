@@ -6,8 +6,12 @@ public class WalInteractive
     private Wal _wal;
 
     public WalInteractive(string fileName)
-	{
-		_wal = new Model.Wal(fileName);
-	}
-}
+    {
+        _wal = new Model.Wal(fileName);
+    }
 
+    public void Start()
+    {
+        Console.WriteLine("==Write Ahead Log browsing==");
+    }
+}
