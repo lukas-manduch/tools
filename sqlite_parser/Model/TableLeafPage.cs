@@ -11,7 +11,7 @@ class TableLeafPage : Page
     {
         return new TableLeafCell(GetCellInternal(index));
     }
-    
+
     protected override int GetCellSize(ReadOnlySpan<byte> data)
     {
         return TableLeafCell.GetSize(data);

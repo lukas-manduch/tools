@@ -13,7 +13,7 @@ class Cell
 class TableLeafCell : Cell
 {
     public TableLeafCell(byte[] data)
-        :base(data)
+        : base(data)
     {
         var payloadSize = Helpers.ParseVarint(data);
         var rowId = Helpers.ParseVarint(data[payloadSize.Length..]);
@@ -97,7 +97,7 @@ class IndexInteriorCell : Cell
         : base(data)
     {
         ReadOnlySpan<byte> bytes = data;
-        LeftChildPointer = Helpers.ParseU32(bytes.Slice(0,4));
+        LeftChildPointer = Helpers.ParseU32(bytes.Slice(0, 4));
         var payloadSize = Helpers.ParseVarint(bytes.Slice(4));
 
         List<byte> b = bytes

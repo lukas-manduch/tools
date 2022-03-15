@@ -2,7 +2,7 @@
 class IndexInteriorPage : Page
 {
     public IndexInteriorPage(byte[] data, uint index)
-        :base(data, index)
+        : base(data, index)
     {
     }
     public override Cell GetCell(int index)

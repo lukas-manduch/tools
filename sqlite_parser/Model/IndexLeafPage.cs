@@ -1,12 +1,12 @@
 ﻿namespace SqliteParser.Model;
-class IndexLeafPage: Page
+class IndexLeafPage : Page
 {
-	public IndexLeafPage(byte[] data, uint index)
-		: base(data, index)
-	{
-	}
+    public IndexLeafPage(byte[] data, uint index)
+        : base(data, index)
+    {
+    }
 
-    public override  Cell GetCell(int index)
+    public override Cell GetCell(int index)
     {
         return new IndexLeafCell(GetCellInternal(index));
     }

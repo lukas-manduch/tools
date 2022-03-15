@@ -4,7 +4,7 @@ using System.Diagnostics;
 
 class DbReader
 {
-    public DbHeader Header { get { return _Header; }}
+    public DbHeader Header { get { return _Header; } }
 
     public DbReader(string fileName)
     {
@@ -51,7 +51,7 @@ class DbReader
 
             using (var binaryReader = new BinaryReader(fileStream))
             {
-                binaryReader.Read(fileBytes, 0, to-from);
+                binaryReader.Read(fileBytes, 0, to - from);
             }
         }
         return fileBytes;
@@ -61,9 +61,9 @@ class DbReader
     {
         if (index == 0 || index > Header.PageCount)
             throw new ArgumentOutOfRangeException(nameof(index));
-        
+
         byte[] data;
-        data = ReadBytes((int) (Header.PageSize*(index-1)), (int) (Header.PageSize*(index)));
+        data = ReadBytes((int)(Header.PageSize * (index - 1)), (int)(Header.PageSize * (index)));
         int offset = 0;
 
         if (index == 1)
@@ -71,7 +71,7 @@ class DbReader
 
         switch (data[offset])
         {
-            
+
             case Constants.SQLITE_HEADER_TABLE_LEAF:
                 return new TableLeafPage(data, index);
             case Constants.SQLITE_HEADER_TABLE_INTERNAL:

@@ -41,9 +41,9 @@ internal class Page
         {
             byte[] data;
             List<UInt16> result = new();
-            data = StartData[8..(8 + CellCount*2)];
+            data = StartData[8..(8 + CellCount * 2)];
             if (HasRightmostPointer)
-                data = StartData[12..(12 + CellCount*2)];
+                data = StartData[12..(12 + CellCount * 2)];
             Debug.Assert((data.Length % 2) == 0);
             for (int i = 0; i < data.Length; i += 2)
             {
@@ -76,7 +76,7 @@ internal class Page
     {
         throw new NotImplementedException("Operation not supported");
     }
-    
+
 
     protected byte[] GetCellInternal(int index)
     {
