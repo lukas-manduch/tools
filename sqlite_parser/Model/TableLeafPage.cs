@@ -2,7 +2,7 @@
 
 class TableLeafPage : Page
 {
-    public TableLeafPage(byte[] data, uint index)
+    public TableLeafPage(ReadOnlySpan<byte> data, uint index)
         : base(data, index)
     {
 

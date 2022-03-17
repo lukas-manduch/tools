@@ -57,6 +57,7 @@ namespace SqliteParser.Service
             }
         }
 
+        // TODO: Delete these 5 functions. They are duplicated in ConsolePrinter
         private static void PrintTableLeafPage(Model.TableLeafPage page)
         {
             for (int index = 0; index < page.CellCount; index++)

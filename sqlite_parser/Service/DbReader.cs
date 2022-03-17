@@ -85,6 +85,24 @@ class DbReader
         }
     }
 
+    public static Page ParsePage(ReadOnlySpan<byte> pageData, uint pageIndex)
+    {
+        Debug.Assert(pageData.Length >= 512);
+        switch(pageData[0])
+        {
+            case Constants.SQLITE_HEADER_TABLE_LEAF:
+                return new TableLeafPage(pageData, pageIndex);
+            case Constants.SQLITE_HEADER_TABLE_INTERNAL:
+                return new TableInteriorPage(pageData, pageIndex);
+            case Constants.SQLITE_HEADER_INDEX_INTERNAL:
+                return new IndexInteriorPage(pageData, pageIndex);
+            case Constants.SQLITE_HEADER_INDEX_LEAF:
+                return new IndexLeafPage(pageData, pageIndex);
+            default:
+                return new Page(pageData, pageIndex);
+        }
+    }
+
     private string _fileName;
     private FileInfo _fileInfo;
     private DbHeader _Header = new DbHeader();

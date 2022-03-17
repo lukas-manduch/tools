@@ -54,13 +54,13 @@ internal class Page
         }
     }
 
-    public Page(byte[] pageBytes, uint index)
+    public Page(ReadOnlySpan<byte> pageBytes, uint index)
     {
-        Data = pageBytes;
+        Data = pageBytes.ToArray();
         PageIndex = index;
-        StartData = pageBytes;
+        StartData = pageBytes.ToArray();
         if (index == 1)
-            StartData = pageBytes[100..];
+            StartData = pageBytes.Slice(100).ToArray();
     }
 
 
@@ -87,20 +87,6 @@ internal class Page
         int cellSize = GetCellSize(cellSlice);
         Debug.Assert(cellSize > 0);
         return Data[cellAddress..(cellAddress + cellSize)];
-
-        // We have to find nearest bigger index
-        //var sorted = CellPointers.ToArray();
-        //Array.Sort(sorted, (a, b) => a.CompareTo(b));  // Ascending sort
-        //int position = Array.BinarySearch(sorted, CellPointers[index]);
-        //Debug.Assert(position >= 0); // We didn't find ourselves?
-        //if (position == (CellCount - 1))
-        //{
-        //    // This is last cell, so till the end. There could be extension data
-        //    // but we don't support that scenario. So we would fail somewhere
-        //    return Data[CellPointers[index]..];
-        //}
-        //// We return
-        //return Data[sorted[position]..sorted[position + 1]];
     }
 
     private byte[] StartData;

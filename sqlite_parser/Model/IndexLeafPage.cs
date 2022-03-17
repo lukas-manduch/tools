@@ -1,7 +1,7 @@
-﻿namespace SqliteParser.Model;
+namespace SqliteParser.Model;
 class IndexLeafPage : Page
 {
-    public IndexLeafPage(byte[] data, uint index)
+    public IndexLeafPage(ReadOnlySpan<byte> data, uint index)
         : base(data, index)
     {
     }

@@ -1,7 +1,7 @@
 namespace SqliteParser.Model;
 class TableInteriorPage : Page
 {
-    public TableInteriorPage(byte[] data, uint index)
+    public TableInteriorPage(ReadOnlySpan<byte> data, uint index)
         : base(data, index)
     {
 

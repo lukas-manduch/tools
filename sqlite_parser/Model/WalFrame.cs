@@ -2,13 +2,14 @@ namespace SqliteParser.Model;
 using System.Linq;
 using System.Diagnostics;
 
-public class WalFrame
+class WalFrame
 {
     public WalFrame(ReadOnlySpan<byte> data)
     {
         Debug.Assert(data.Length > 24);
         ParseHeader(data.Slice(0, 24));
         Data = data.ToArray();
+        Page = DbReader.ParsePage(data.Slice(24), PageNumber);
     }
 
     public bool IsChecksumValid(UInt32 checksum1, UInt32 checksum2, bool isBe)
@@ -39,5 +40,6 @@ public class WalFrame
     public UInt32 Checksum2;
 
     public byte[] Data;
+    public Page Page;
 }
 
