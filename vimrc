@@ -329,3 +329,5 @@ function! ExecuteTest()
         let l:pane_id = system(l:pane_id_command)
         execute "!tmux send -t " . l:pane_id . " C-a C-k " . shellescape(g:TMUX_COMMAND) . " ENTER"
 endfunction
+
+" ctags  -R --kinds-python=cfm
