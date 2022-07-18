@@ -216,6 +216,16 @@ function s:SetupVimSettings(dir)
 		let &grepprg = "rg --vimgrep --color=auto $*"
 		let $FZF_DEFAULT_COMMAND="rg --files"
 	endif
+	if has('nvim')                                                                                                                                                                 
+lua <<EOF                                                                                                                                                                              
+                require'nvim-treesitter.configs'.setup {                                                                                                                               
+                   highlight = {                                                                                                                                                       
+                     enable = true,                                                                                                                                                    
+                     additional_vim_regex_highlighting = false,                                                                                                                        
+                   },                                                                                                                                                                  
+                 }                                                                                                                                                                     
+EOF     
+	endif
 endfunction
 
 
@@ -276,6 +286,7 @@ function! s:SetUpDependencies(rootDir, opt)
 		PlugUpdate
 	else
 		call plug#begin(l:start)
+		Plug 'nvim-treesitter/nvim-treesitter'
 		Plug 'tpope/vim-sensible'
 		Plug 'tpope/vim-surround'
 		Plug 'psliwka/vim-smoothie'
