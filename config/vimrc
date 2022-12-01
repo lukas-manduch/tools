@@ -249,14 +249,19 @@ function s:SetupVimSettings(dir)
 		let $FZF_DEFAULT_COMMAND="rg --files"
 	endif
 	if has('nvim')                                                                                                                                                                 
-lua <<EOF                                                                                                                                                                              
+lua <<EOF
                 require'nvim-treesitter.configs'.setup {                                                                                                                               
                    highlight = {                                                                                                                                                       
                      enable = true,                                                                                                                                                    
                      additional_vim_regex_highlighting = false,                                                                                                                        
                    },                                                                                                                                                                  
-                 }                                                                                                                                                                     
-EOF     
+                }
+		local vim = vim
+		local opt = vim.opt
+
+		opt.foldmethod = "expr"
+		opt.foldexpr = "nvim_treesitter#foldexpr()"
+EOF
 	endif
 endfunction
 
@@ -340,7 +345,6 @@ function! s:SetUpDependencies(rootDir, opt)
 endfunction
 
 function! MYSetupVim(...)
-" When given 1 as argument, installs opt
 	if empty(&rtp)
 		echom "No path found (rtp)"
 		return 1
