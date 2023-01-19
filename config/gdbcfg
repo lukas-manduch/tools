@@ -1,0 +1,12 @@
+display /12i $rip
+
+display /x $rax
+display /x $rbx
+display /x $rdx
+
+display /x $rdi
+display /x $rsi
+
+
+display /x $rbp
+display /5wx $rsp
