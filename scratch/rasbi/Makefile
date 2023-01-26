@@ -1,7 +1,9 @@
+CFLAGS := -Wall -Wextra -g
+
 main.o: src/main.c
-	gcc -c src/main.c -o main.o -std=c17
+	$(CC) $(CFLAGS) -c src/main.c -o $@ -std=c17 -nostdlib
 program.exe: main.o
-	gcc main.o -o program.exe -std=c17
+	gcc main.o -o program.exe -std=c17 -nostdlib
 
 all: program.exe
 
