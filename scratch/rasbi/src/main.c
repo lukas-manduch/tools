@@ -1,10 +1,13 @@
 #include <sys/types.h>
 
 #define DEBUG 1
+#define LOCAL static
 #define NULL 0
 #define FALSE 0
 #define TRUE 1
 #define STACK_SIZE 4096
+#define HEAP_SIZE 4096
+#define U32_MAX 0xffffffff
 #define u64 unsigned long long
 #define u32 unsigned int
 #define i32 int
@@ -60,18 +63,21 @@ i64 sys_write(u32 fd, const char *buf, u64 count) {
 #error "Bad c version, use std=c17"
 #endif
 
+struct AllocEntry {
+	u32 size;
+	unsigned char pad1;
+	unsigned char pad2;
+	unsigned char free; // Is following block free (1) or taken (0)?
+	unsigned char next; // Is there next block ? (1) or is this the end (0)
+};
+_Static_assert(sizeof(struct AllocEntry) == 8, "Bad size AllocEntry");
+
 struct context {
-	char heap[STACK_SIZE];
+	char heap[HEAP_SIZE];
 
 	char stack[STACK_SIZE];
 	unsigned short _stack_pointer;
 };
-
-void init_context(struct context* ctx) {
-	for (int i = 0; i < STACK_SIZE; i++)
-		ctx->stack[i] = 0xFF;
-	ctx->_stack_pointer = STACK_SIZE;
-}
 
 enum ExpressionType {
 	SYMBOL   = 1 << 1, 
@@ -95,7 +101,9 @@ typedef struct ExpressionT {
 	};
 } Expression;
 
-
+static inline u64 round8(u64 num) {
+	return num + (num % 8);
+}
 
 #if DEBUG == 0
 #define DEBUG_ERROR(str) void()
@@ -138,7 +146,99 @@ void print_expression(const struct ExpressionT* expression) {
 #endif
 
 
-void* stack_push_var(struct context* ctx, u64 size) {
+void* heap_alloc(struct context* context, u64 size) {
+	u32 minimal_alloc = sizeof(struct AllocEntry) + 8;
+	u32 requested = round8(size);
+	struct AllocEntry* ret = NULL;
+	struct AllocEntry *entry = (struct AllocEntry*)context->heap;
+	while (TRUE) {
+#ifdef DEBUG
+		if (entry->pad1 != 0xda || entry->pad2 != 0xde) {
+			DEBUG_ERROR("Invalid alloc entry");
+			return NULL;
+		}
+#endif
+		if (entry->free && entry->size >= requested) {
+			break;
+		}
+		if (!entry->next) { // This was the last block
+			DEBUG_ERROR("Memory is full");
+			return NULL;
+		}
+		entry = (struct AllocEntry*)
+			((char*)entry + sizeof(*entry) + entry->size);
+	}
+	// Chunk cannot be split
+	if (entry->size <= requested + minimal_alloc) {
+		entry->free = 0;
+		ret = entry;
+		return (char*)ret + sizeof(struct AllocEntry);
+	}
+	// We have to split chunk
+	u32 rest = entry->size - requested - sizeof(struct AllocEntry);
+	unsigned char has_next = entry->next;
+	entry->free = 0;
+	entry->size = requested;
+	entry->next = 1;
+	ret = entry;
+	entry = (struct AllocEntry*)
+		(char*)entry + sizeof(struct AllocEntry) + entry->size;
+	// Now we have new entry
+	entry->size = rest;
+	entry->next = has_next;
+	entry->free = 1;
+	entry->pad1 = 0xda;
+	entry->pad2 = 0xde;
+	return (char*)ret + sizeof(struct AllocEntry);
+}
+
+
+LOCAL int init_heap(void* data, u64 size) {
+	if (size <= sizeof(struct AllocEntry)) {
+		DEBUG_ERROR("Heap is too small");
+		return -1;
+	}
+	if (size > U32_MAX) {
+		DEBUG_ERROR("32 bit heap only!");
+		return -1;
+	}
+	// "Zero out" memory
+	for (u64 i = 0; i < size; i++) {
+		u64 order = i & 3;
+		char* cdata = (char*)data;
+		switch (order) {
+			case 0:
+				cdata[i] = 0xde;
+				break;
+			case 1:
+				cdata[i] = 0xad;
+				break;
+			case 2:
+				cdata[i] = 0xbe;
+				break;
+			case 3:
+				cdata[i] = 0xef;
+				break;
+		}
+	}
+	struct AllocEntry* entry = (struct AllocEntry*) data;
+	entry->size = size - sizeof(struct AllocEntry);
+	entry->next = 0;
+	entry->free = 1;
+	entry->pad1 = 0xda;
+	entry->pad2 = 0xde;
+	return 0;
+}
+
+void init_context(struct context* ctx) {
+	for (int i = 0; i < STACK_SIZE; i++)
+		ctx->stack[i] = 0xAA;
+	ctx->_stack_pointer = STACK_SIZE;
+	init_heap(ctx->heap, HEAP_SIZE); 
+}
+
+
+LOCAL void* stack_push_var(struct context* ctx, u64 size) {
 	if ((size % 8) != 0) {
 		return NULL; // Unaligned alloc, not supported
 	}
@@ -160,13 +260,9 @@ void* stack_push_u64(struct context* ctx, u64 value) {
 	return addr;
 }
 
-void* heap_alloc(struct context* context, u64 size) {
-	return stack_push_var(context, size); // Temp hack
-}
 
 
-
-i32 parser_find_next_char(const char* buf, u64 start_position, u64 count) {
+LOCAL i32 parser_find_next_char(const char* buf, u64 start_position, u64 count) {
 	for (u64 i = start_position; i < count; i++) {
 		switch(buf[i]) {
 			case ' ':
