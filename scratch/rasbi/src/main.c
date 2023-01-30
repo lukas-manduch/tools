@@ -182,7 +182,7 @@ void* heap_alloc(struct context* context, u64 size) {
 	entry->next = 1;
 	ret = entry;
 	entry = (struct AllocEntry*)
-		(char*)entry + sizeof(struct AllocEntry) + entry->size;
+		((char*)entry + sizeof(struct AllocEntry) + entry->size);
 	// Now we have new entry
 	entry->size = rest;
 	entry->next = has_next;
