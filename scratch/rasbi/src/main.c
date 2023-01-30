@@ -82,14 +82,20 @@ struct context {
 enum ExpressionType {
 	SYMBOL   = 1 << 1, 
 	STRING   = 1 << 2,
-	LIST     = 1 << 3,
+	CONS     = 1 << 3,
 	NUMBER   = 1 << 4,
 	FUNCTION = 1 << 5,
+	NIL      = 1 << 6,
 };
 
 struct StringExpression {
 	u32 size;
 	char content[];
+};
+
+
+struct _listExpression {
+	struct ConsCell* cell;
 };
 
 typedef struct ExpressionT {
@@ -98,9 +104,14 @@ typedef struct ExpressionT {
 	union {
 		u64 value64;
 		struct StringExpression value_string;
+		struct _listExpression value_list;
 	};
 } Expression;
 
+struct ConsCell {
+	struct ExpressionT* car;
+	struct ExpressionT* cdr;
+};
 static inline u64 round8(u64 num) {
 	return num + (num % 8);
 }
@@ -135,6 +146,19 @@ void print_expression(const struct ExpressionT* expression) {
 			sys_write(0, expression->value_string.content, size);
 			break;
 
+		}
+	case CONS:
+		{
+			sys_write(0, "( ", 2);
+			if (expression->value_list.cell != NULL) {
+				struct ConsCell *curr = expression->value_list.cell;
+				print_expression(curr->car);
+				sys_write(0, " ", 1);
+				print_expression(curr->cdr);
+
+			}
+			sys_write(0, " )", 2);
+			break;
 		}
 	default:
 		print_cstring("[NOT_IMPLEMENTED]");
@@ -261,6 +285,13 @@ void* stack_push_u64(struct context* ctx, u64 value) {
 }
 
 
+u32 c_strlen(const char* str) {
+	u32 len = 0;
+	while (str[len] != 0) len++;
+	return len;
+}
+
+// PARSERS:
 
 LOCAL i32 parser_find_next_char(const char* buf, u64 start_position, u64 count) {
 	for (u64 i = start_position; i < count; i++) {
@@ -328,7 +359,7 @@ Expression* parser_parse_string(
 	return ret;
 }
 
-struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct context* ctx) {
+struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct context* ctx, u64* out_processed) {
 	Expression* ret = NULL;
 	for (i64 i = 0; i < count || buf[i] != 0; i++) {
 		char c = buf[i];
@@ -340,7 +371,18 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 				return NULL;
 			}
 
-			ret->expr_type = FUNCTION;
+			ret->expr_type = CONS;
+			ret->value_list.cell = NULL;
+			struct ConsCell* cons = (struct ConsCell*)
+				heap_alloc(ctx, sizeof(struct ConsCell));
+			if (!cons) {
+				DEBUG_ERROR("Cons allocation failed");
+				return NULL;
+			}
+
+			cons->car = NULL;
+			cons->cdr = NULL;
+			ret->value_list.cell = cons;
 			
 			while (1) { // Load everythin inside expression
 				i = parser_find_next_char(buf,i+1, count);
@@ -348,15 +390,27 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 					// TODO: Free memory
 					DEBUG_ERROR("Cannot find closing brace");
 					return ret;
-
 				}
 				if (buf[i] == ')') { // Parsing finished
 					return ret;
 				}
 
-				Expression* es = parser_parse_expression(buf+i, count - i, ctx);
-				return es;
+				u64 skip = 0;
+				Expression* es = parser_parse_expression(buf+i, count - i, ctx, &skip);
+				i += skip - 1;
+				struct ConsCell *cons = heap_alloc(ctx, sizeof(struct ConsCell));
+				if (!cons) {
+					DEBUG_ERROR("Cannot allocate cons");
+					return NULL;
+				}
+				cons->car = es;
+				cons->cdr = NULL;
+				if (ret->value_list.cell != NULL) {
+					ret->value_list.cell = cons;
+				}
 			}
+			DEBUG_ERROR("Unclosed expression");
+			return NULL;
 		} else if (c == '"')  {
 			u64 string_size = 0;
 			struct ExpressionT* es =
@@ -364,8 +418,13 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 			if (es == NULL) {
 				DEBUG_ERROR("Invalid string parse");
 			}
-			i += string_size - 1;
+			if (out_processed)
+				*out_processed =  string_size + i;
 			return es;
+		}
+		else {
+			DEBUG_ERROR("Invalid character");
+			return NULL;
 		}
 	}
 	DEBUG_ERROR("Wrong");
@@ -401,13 +460,14 @@ good:
 	return dest_write;
 }
 
+// END PARSERS
 
 
 void _start() {
-	char command[] = {'"', '1','2','h','4','h','6','h','8', '"' };
+	const char* command = "(\"some long string here\")";
 	struct context ctx;
 	init_context(&ctx);
-	Expression* ex = parser_parse_expression(command, 10, &ctx);
+	Expression* ex = parser_parse_expression(command, c_strlen(command), &ctx, NULL);
 	print_expression(ex);
 	//sys_write(0, ex->value_string.content, 8);
 	sys_exit(17);
