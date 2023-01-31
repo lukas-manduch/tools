@@ -143,7 +143,9 @@ void print_expression(const struct ExpressionT* expression) {
 	case STRING:
 		{
 			u64 size = expression->value_string.size;
+			sys_write(0, "\"", 1);
 			sys_write(0, expression->value_string.content, size);
+			sys_write(0, "\"", 1);
 			break;
 
 		}
@@ -157,7 +159,7 @@ void print_expression(const struct ExpressionT* expression) {
 				print_expression(curr->cdr);
 
 			}
-			sys_write(0, " )", 2);
+			sys_write(0, ")", 2);
 			break;
 		}
 	default:
@@ -373,16 +375,6 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 
 			ret->expr_type = CONS;
 			ret->value_list.cell = NULL;
-			struct ConsCell* cons = (struct ConsCell*)
-				heap_alloc(ctx, sizeof(struct ConsCell));
-			if (!cons) {
-				DEBUG_ERROR("Cons allocation failed");
-				return NULL;
-			}
-
-			cons->car = NULL;
-			cons->cdr = NULL;
-			ret->value_list.cell = cons;
 			
 			while (1) { // Load everythin inside expression
 				i = parser_find_next_char(buf,i+1, count);
@@ -405,8 +397,20 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 				}
 				cons->car = es;
 				cons->cdr = NULL;
-				if (ret->value_list.cell != NULL) {
+				Expression* consExpr = heap_alloc(ctx, sizeof(struct ExpressionT));
+				if (!consExpr) {
+					DEBUG_ERROR("Cons wapper alloc failed");
+					return NULL;
+				}
+				consExpr->expr_type = CONS;
+				consExpr->value_list.cell = cons;
+				if (ret->value_list.cell == NULL) {
 					ret->value_list.cell = cons;
+				} else {
+					struct ConsCell* cur = ret->value_list.cell;
+					while (cur->cdr != NULL)
+						cur = cur->cdr->value_list.cell;
+					cur->cdr = consExpr;
 				}
 			}
 			DEBUG_ERROR("Unclosed expression");
@@ -464,7 +468,7 @@ good:
 
 
 void _start() {
-	const char* command = "(\"some long string here\")";
+	const char* command = "(\"some long string here\" \"\" \" And this one \")";
 	struct context ctx;
 	init_context(&ctx);
 	Expression* ex = parser_parse_expression(command, c_strlen(command), &ctx, NULL);
