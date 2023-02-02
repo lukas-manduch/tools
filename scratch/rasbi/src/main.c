@@ -2,6 +2,7 @@
 
 #define DEBUG 1
 #define LOCAL static
+#define INLINE static inline
 #define NULL 0
 #define FALSE 0
 #define TRUE 1
@@ -83,9 +84,6 @@ enum ExpressionType {
 	SYMBOL   = 1 << 1, 
 	STRING   = 1 << 2,
 	CONS     = 1 << 3,
-	NUMBER   = 1 << 4,
-	FUNCTION = 1 << 5,
-	NIL      = 1 << 6,
 };
 
 struct StringExpression {
@@ -98,6 +96,7 @@ struct _listExpression {
 	struct ConsCell* cell;
 };
 
+
 typedef struct ExpressionT {
 	u32 expr_type;
 	u32 pad;
@@ -105,6 +104,7 @@ typedef struct ExpressionT {
 		u64 value64;
 		struct StringExpression value_string;
 		struct _listExpression value_list;
+		struct StringExpression value_symbol;
 	};
 } Expression;
 
@@ -162,10 +162,14 @@ void print_expression(const struct ExpressionT* expression) {
 			sys_write(0, ")", 2);
 			break;
 		}
+	case SYMBOL:
+		{
+			sys_write(0, expression->value_string.content, expression->value_string.size);
+			break;
+		}
 	default:
 		print_cstring("[NOT_IMPLEMENTED]");
 	}
-
 }
 
 #define DEBUG_ERROR(str) __debug_print(str)
@@ -287,13 +291,67 @@ void* stack_push_u64(struct context* ctx, u64 value) {
 }
 
 
-u32 c_strlen(const char* str) {
+INLINE u32 c_strlen(const char* str) {
 	u32 len = 0;
 	while (str[len] != 0) len++;
 	return len;
 }
 
-// PARSERS:
+void c_strcpy_s(char *dest, u64 destsz, const char *src ) {
+	for (u64 i = 0; i < destsz && src[i] != 0; i++) {
+		dest[i] = src[i];
+	}
+}
+
+INLINE i32 is_alphabet(char c) {
+	if (c >= 'a' && c <= 'z')
+		return TRUE;
+	if (c >= 'A' && c <= 'Z')
+		return TRUE;
+	return FALSE;
+}
+
+INLINE i32 is_space(char c) {
+	switch (c) {
+		case ' ':
+		case '\n':
+		case '\t':
+			return TRUE;
+		default:
+			return FALSE;
+	}
+}
+
+
+/** Allocate empty string expression on context heap.
+ *
+ */
+struct ExpressionT* alloc_string(u64 length, struct context* ctx) {
+	struct ExpressionT* expr_str =
+		heap_alloc(ctx, sizeof(struct ExpressionT) + length);
+	if (!expr_str) {
+		DEBUG_ERROR("String allocation failed");
+		return NULL;
+	}
+	expr_str->expr_type = STRING;
+	expr_str->value_string.size = length;
+	return expr_str;
+}
+
+/** Allocate symbol expression on context.
+ * For now, we are storing symbols as string. Only differenet thing is flag in
+ * expression type
+ */
+struct ExpressionT* alloc_symbol(u64 length, struct context* ctx) {
+	struct ExpressionT* ret = alloc_string(length, ctx);
+	if (ret)
+		ret->expr_type = SYMBOL;
+	return ret;
+}
+
+// ============================
+//   PARSERS
+// ============================
 
 LOCAL i32 parser_find_next_char(const char* buf, u64 start_position, u64 count) {
 	for (u64 i = start_position; i < count; i++) {
@@ -309,6 +367,39 @@ LOCAL i32 parser_find_next_char(const char* buf, u64 start_position, u64 count) 
 	return -1;
 }
 
+/** Subparser for symbols (names)
+ */
+Expression* parser_parse_symbol(
+		const char* buf,
+		u64 max_size,
+		/* out */ u64* num_processed,
+		struct context* ctx) {
+	u32 symbol_size = 0;
+	for (; symbol_size < max_size; symbol_size++) {
+		if (is_alphabet(buf[symbol_size]))
+			continue;
+		if (buf[symbol_size] == 0 || buf[symbol_size] == ')')
+			break;
+		if (is_space(buf[symbol_size]))
+			break;
+		DEBUG_ERROR("Invalid symbol");
+		return NULL;
+	}
+	struct ExpressionT* ret = alloc_symbol(symbol_size, ctx);
+	if (!ret) {
+		DEBUG_ERROR("Symbol allocation failed");
+		return ret; // NULL
+	}
+	c_strcpy_s(ret->value_string.content, symbol_size, buf);
+	if (num_processed)
+		*num_processed = symbol_size;
+	return ret;
+}
+
+/** Subparser for strings
+ *
+ * In future it should support constructs like \n and \"
+ */
 Expression* parser_parse_string(
 		const char* buf,
 		u64 max_size,
@@ -361,11 +452,16 @@ Expression* parser_parse_string(
 	return ret;
 }
 
+/** Main parser method, given string parses first expression until the end.
+ *
+ * Returns expression representing whole parsed code or NULL.
+ * This method might call itself recursively
+ */
 struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct context* ctx, u64* out_processed) {
 	Expression* ret = NULL;
 	for (i64 i = 0; i < count || buf[i] != 0; i++) {
 		char c = buf[i];
-		if (c == '(') { // Begin of expression
+		if (c == '(') { // This will be new list
 			// int j = i+1;
 			ret = heap_alloc(ctx, sizeof(Expression));
 			if (!ret) {
@@ -415,16 +511,28 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 			}
 			DEBUG_ERROR("Unclosed expression");
 			return NULL;
-		} else if (c == '"')  {
+		} else if (c == '"')  { // Parse string
 			u64 string_size = 0;
 			struct ExpressionT* es =
 				parser_parse_string(buf+i, count-i, &string_size, ctx);
 			if (es == NULL) {
 				DEBUG_ERROR("Invalid string parse");
+				return NULL;
 			}
 			if (out_processed)
 				*out_processed =  string_size + i;
 			return es;
+		}
+		else if (is_alphabet(c)) { // Parse symbol
+			u64 string_size = 0;
+			Expression* expr = parser_parse_symbol(buf+i, count-i, &string_size, ctx);
+			if (!expr) {
+				DEBUG_ERROR("Cannot parse symbol");
+				return NULL;
+			}
+			if (out_processed)
+				*out_processed =  string_size + i;
+			return expr;
 		}
 		else {
 			DEBUG_ERROR("Invalid character");
@@ -464,11 +572,14 @@ good:
 	return dest_write;
 }
 
-// END PARSERS
+// ============================
+//   END PARSERS
+// ============================
+
 
 
 void _start() {
-	const char* command = "(\"some long string here\" \"\" \" And this one \")";
+	const char* command = "(\"some long string here\" \"\" \" And this one \" yolo)";
 	struct context ctx;
 	init_context(&ctx);
 	Expression* ex = parser_parse_expression(command, c_strlen(command), &ctx, NULL);
