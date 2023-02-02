@@ -1,10 +1,13 @@
 CFLAGS := -Wall -Wextra -g
 
-main.o: src/main.c
-	$(CC) $(CFLAGS) -c src/main.c -o $@ -std=c17 -nostdlib
-program.exe: main.o
-	gcc main.o -o program.exe -std=c17 -nostdlib
+out/main.o: src/main.c
+	$(CC) $(CFLAGS) -c $^ -o $@ -std=c17 -nostdlib
+out/program.exe: out/main.o
+	gcc $^ -o $@ -std=c17 -nostdlib
 
-all: program.exe
+all: out/program.exe
+
+clean:
+	rm -f ./out/*
 
 .DEFAULT_GOAL=all
