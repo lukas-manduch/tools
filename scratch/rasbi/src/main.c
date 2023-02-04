@@ -73,13 +73,6 @@ struct AllocEntry {
 };
 _Static_assert(sizeof(struct AllocEntry) == 8, "Bad size AllocEntry");
 
-struct context {
-	char heap[HEAP_SIZE];
-
-	char stack[STACK_SIZE];
-	unsigned short _stack_pointer;
-};
-
 enum ExpressionType {
 	SYMBOL   = 1 << 1, 
 	STRING   = 1 << 2,
@@ -112,6 +105,18 @@ struct ConsCell {
 	struct ExpressionT* car;
 	struct ExpressionT* cdr;
 };
+
+/** This is whole state of parser and interpreter.
+ */
+struct context {
+	char heap[HEAP_SIZE];
+
+	char stack[STACK_SIZE];
+	unsigned short _stack_pointer;
+	struct ExpressionT* symbol_table; // This shall be CONS reference
+	struct ExpressionT* program; // This shall be CONS reference
+};
+
 static inline u64 round8(u64 num) {
 	return num + (num % 8);
 }
@@ -265,6 +270,8 @@ void init_context(struct context* ctx) {
 		ctx->stack[i] = 0xAA;
 	ctx->_stack_pointer = STACK_SIZE;
 	init_heap(ctx->heap, HEAP_SIZE); 
+	ctx->symbol_table = NULL;
+	ctx->program = NULL;
 }
 
 
@@ -452,7 +459,7 @@ Expression* parser_parse_string(
 	return ret;
 }
 
-/** Main parser method, given string parses first expression until the end.
+/** Generic parser method, given string parses first expression until the end.
  *
  * Returns expression representing whole parsed code or NULL.
  * This method might call itself recursively
@@ -485,6 +492,10 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 
 				u64 skip = 0;
 				Expression* es = parser_parse_expression(buf+i, count - i, ctx, &skip);
+				if (!es) {
+					DEBUG_ERROR("Invalid expression");
+					return NULL;
+				}
 				i += skip - 1;
 				struct ConsCell *cons = heap_alloc(ctx, sizeof(struct ConsCell));
 				if (!cons) {
@@ -543,33 +554,16 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 	return NULL;
 }
 
-
-/** Parse string defined inside "". 
- * Return -1 on failure, parsed string size on success
+/** Main parser method, used to call parser from outside
+ *  All structure are allocated on context heap
  */
-int _parser_parse_string(
-	const char* src, size_t max_size_src, char* dst, size_t max_size_dst) {
-	//--
-	if (max_size_src < 2 || src[0] != '"') {
-		// String doesn't start with braces
+int parse_program(struct context* ctx, const char* buf, u64 size) {
+	Expression *exp = parser_parse_expression(buf, size, ctx, NULL);
+	if  (!exp) {
 		return -1;
 	}
-	size_t dest_write = 0;
-
-	for (size_t i = 1; i < max_size_src && dest_write < max_size_dst; i++) {
-		if (src[i] == '"') {
-			goto good;
-		}
-
-		if(src[i] == '\\') { // Currently not supported
-			return -1;
-		}
-		dst[dest_write] = src[i];
-	}
-	// this is bad
-	return -1;
-good:
-	return dest_write;
+	ctx->program = exp;
+	return 0;
 }
 
 // ============================
@@ -577,13 +571,27 @@ good:
 // ============================
 
 
+// ============================
+//   INTERPRETER
+// ============================
+
+struct ExpressionT* execute(struct context* ctx) {
+	return NULL;
+}
+
+// ============================
+//   END INTERPRETER
+// ============================
+
 
 void _start() {
-	const char* command = "(\"some long string here\" \"\" \" And this one \" yolo)";
+	const char* command = "(\"some long string here\"  \"\" \" And this one \" yolo)";
 	struct context ctx;
 	init_context(&ctx);
-	Expression* ex = parser_parse_expression(command, c_strlen(command), &ctx, NULL);
-	print_expression(ex);
-	//sys_write(0, ex->value_string.content, 8);
-	sys_exit(17);
+	if (parse_program(&ctx, command, c_strlen(command)) < 0) {
+		const char* err_parse = "Cannot parse program";
+		sys_write(1, err_parse, c_strlen(err_parse));
+		sys_exit(1);
+	}
+	sys_exit(0);
 }
