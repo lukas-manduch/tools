@@ -79,6 +79,10 @@ enum ExpressionType {
 	CONS     = 1 << 3,
 };
 
+enum RuntimeErrors {
+	RUNTIME_ARGUMENT_COUNT,
+};
+
 struct StringExpression {
 	u32 size;
 	char content[];
@@ -297,6 +301,16 @@ void* stack_push_u64(struct context* ctx, u64 value) {
 	return addr;
 }
 
+/** Get pointer to stack.
+ * Useful to retrieve local variables or arguments.
+ */
+void* stack_get_ptr(struct context* ctx, i64 offset) {
+	if ((offset % 8) != 0) {
+		return NULL;
+	}
+	return &ctx->stack[ctx->_stack_pointer + offset];
+}
+
 
 INLINE u32 c_strlen(const char* str) {
 	u32 len = 0;
@@ -333,7 +347,7 @@ INLINE i32 is_space(char c) {
 /** Allocate empty string expression on context heap.
  *
  */
-struct ExpressionT* alloc_string(u64 length, struct context* ctx) {
+struct ExpressionT* alloc_string(struct context* ctx, u64 length) {
 	struct ExpressionT* expr_str =
 		heap_alloc(ctx, sizeof(struct ExpressionT) + length);
 	if (!expr_str) {
@@ -349,12 +363,76 @@ struct ExpressionT* alloc_string(u64 length, struct context* ctx) {
  * For now, we are storing symbols as string. Only differenet thing is flag in
  * expression type
  */
-struct ExpressionT* alloc_symbol(u64 length, struct context* ctx) {
-	struct ExpressionT* ret = alloc_string(length, ctx);
+struct ExpressionT* alloc_symbol(struct context* ctx, u64 length) {
+	struct ExpressionT* ret = alloc_string(ctx, length);
 	if (ret)
 		ret->expr_type = SYMBOL;
 	return ret;
 }
+
+// RUNTIME FUNCTIONS
+
+// struct Expression* _copy_string_heap(
+// 		struct context* ctx, const char* str, u64 str_size) {
+// 
+// }
+// 
+// LOCAL struct Expression* runtime_get_error(struct context* ctx, u64 number) {
+// 	switch (number) {
+// 		case RUNTIME_ARGUMENT_COUNT:
+// 			{
+// 				break;
+// 			}
+// 		default:
+// 			return NULL;
+// 	}
+// }
+
+INLINE u64 runtime_get_arg_count(struct context* ctx) {
+	return *(u64*)stack_get_ptr(ctx, 0);
+}
+
+/** Get argument from stack
+ * arg_pos is order of argument that function will retrieve. Indexing starts
+ * at 1
+ */
+INLINE struct ExpressionT* runtime_get_arg(struct context* ctx, short arg_pos) {
+	struct ExpressionT** exp =
+		(struct ExpressionT**)stack_get_ptr(ctx, arg_pos*(-1)*8);
+	if (!exp) {
+		DEBUG_ERROR("Abort! stack get returns NULL");
+		return NULL; // Temporary
+	}
+	return *exp;
+}
+
+void runtime_concat(struct context* ctx) {
+	u64 argcount = runtime_get_arg_count(ctx);
+	if (argcount != 2) {
+		DEBUG_ERROR("Wrong arg count, fixme message");
+		return;
+	}
+	struct ExpressionT *arg1, *arg2;
+	arg1 = runtime_get_arg(ctx, 1);
+	arg2 = runtime_get_arg(ctx, 2);
+	u64 final_size = arg1->value_string.size + arg2->value_string.size;
+	struct ExpressionT* result = alloc_string(ctx, final_size);
+	if (!result) {
+		DEBUG_ERROR("Fail here, cannot allocate fixme");
+		return;
+	}
+	c_strcpy_s(result->value_string.content,
+		arg1->value_string.size, arg1->value_string.content);
+	c_strcpy_s(result->value_string.content+arg1->value_string.size,
+		arg2->value_string.size, arg2->value_string.content);
+
+	sys_write(1, result->value_string.content, result->value_string.size);
+
+
+}
+
+// END RUNTIME FUNCTIONS
+
 
 // ============================
 //   PARSERS
@@ -392,7 +470,7 @@ Expression* parser_parse_symbol(
 		DEBUG_ERROR("Invalid symbol");
 		return NULL;
 	}
-	struct ExpressionT* ret = alloc_symbol(symbol_size, ctx);
+	struct ExpressionT* ret = alloc_symbol(ctx, symbol_size);
 	if (!ret) {
 		DEBUG_ERROR("Symbol allocation failed");
 		return ret; // NULL
@@ -570,13 +648,62 @@ int parse_program(struct context* ctx, const char* buf, u64 size) {
 //   END PARSERS
 // ============================
 
+INLINE struct ExpressionT* list_get_cdr(struct ExpressionT* curr) {
+	if (curr && curr->expr_type == CONS) {
+		return curr->value_list.cell->cdr;
+	}
+	return NULL;
+}
+
+INLINE struct ExpressionT* list_get_car(struct ExpressionT* curr) {
+	if (curr && curr->expr_type == CONS && curr->value_list.cell->car) {
+		return curr->value_list.cell->car;
+	}
+	return NULL;
+}
 
 // ============================
 //   INTERPRETER
 // ============================
 
-struct ExpressionT* execute(struct context* ctx) {
-	return NULL;
+int interpreter_push_args(struct context* ctx, struct ExpressionT* rest) {
+	while (rest) {
+		struct ExpressionT * val = list_get_car(rest);
+		if (!val) {
+			DEBUG_ERROR("Invalid function call, (parser error)");
+			return -1;
+		}
+		void *stackp = stack_push_u64(ctx, (u64)val);
+		if (!stackp) {
+			DEBUG_ERROR("Stack push failed");
+			return -1;
+		}
+		rest = list_get_cdr(rest);
+	}
+	return 0;
+}
+
+int interpreter_call_function(struct context* ctx, struct ExpressionT* expr) {
+	struct ExpressionT* func = list_get_car(expr);
+	if (!func) {
+		DEBUG_ERROR("Func error");
+		return -1;
+	}
+	if (func->expr_type == SYMBOL) {
+		DEBUG_ERROR("Executing function");
+		sys_write(1, func->value_symbol.content, func->value_symbol.size);
+	}
+	if (interpreter_push_args(ctx, list_get_cdr(expr)) != 0) {
+		return -1;
+	}
+	return 0;
+}
+
+int execute(struct context* ctx) {
+	if(!ctx->program) {
+		return -1;
+	}
+	return interpreter_call_function(ctx, ctx->program);
 }
 
 // ============================
@@ -585,13 +712,19 @@ struct ExpressionT* execute(struct context* ctx) {
 
 
 void _start() {
-	const char* command = "(\"some long string here\"  \"\" \" And this one \" yolo)";
+	const char* command = "(concat \"some long string here\"  \"\" \" And this one \" yolo)";
 	struct context ctx;
 	init_context(&ctx);
 	if (parse_program(&ctx, command, c_strlen(command)) < 0) {
 		const char* err_parse = "Cannot parse program";
 		sys_write(1, err_parse, c_strlen(err_parse));
 		sys_exit(1);
+	}
+	if (execute(&ctx) < 0) {
+		const char* err_exec  = "Cannot execute program";
+		sys_write(1, err_exec , c_strlen(err_exec ));
+		sys_exit(1);
+
 	}
 	sys_exit(0);
 }
