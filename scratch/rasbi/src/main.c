@@ -88,6 +88,7 @@ struct StringExpression {
 	char content[];
 };
 
+// TODO: This probably should be value, pointer is just more work
 
 struct _listExpression {
 	struct ConsCell* cell;
@@ -369,71 +370,6 @@ struct ExpressionT* alloc_symbol(struct context* ctx, u64 length) {
 		ret->expr_type = SYMBOL;
 	return ret;
 }
-
-// RUNTIME FUNCTIONS
-
-// struct Expression* _copy_string_heap(
-// 		struct context* ctx, const char* str, u64 str_size) {
-// 
-// }
-// 
-// LOCAL struct Expression* runtime_get_error(struct context* ctx, u64 number) {
-// 	switch (number) {
-// 		case RUNTIME_ARGUMENT_COUNT:
-// 			{
-// 				break;
-// 			}
-// 		default:
-// 			return NULL;
-// 	}
-// }
-
-INLINE u64 runtime_get_arg_count(struct context* ctx) {
-	return *(u64*)stack_get_ptr(ctx, 0);
-}
-
-/** Get argument from stack
- * arg_pos is order of argument that function will retrieve. Indexing starts
- * at 1
- */
-INLINE struct ExpressionT* runtime_get_arg(struct context* ctx, short arg_pos) {
-	struct ExpressionT** exp =
-		(struct ExpressionT**)stack_get_ptr(ctx, arg_pos*(-1)*8);
-	if (!exp) {
-		DEBUG_ERROR("Abort! stack get returns NULL");
-		return NULL; // Temporary
-	}
-	return *exp;
-}
-
-void runtime_concat(struct context* ctx) {
-	u64 argcount = runtime_get_arg_count(ctx);
-	if (argcount != 2) {
-		DEBUG_ERROR("Wrong arg count, fixme message");
-		return;
-	}
-	struct ExpressionT *arg1, *arg2;
-	arg1 = runtime_get_arg(ctx, 1);
-	arg2 = runtime_get_arg(ctx, 2);
-	u64 final_size = arg1->value_string.size + arg2->value_string.size;
-	struct ExpressionT* result = alloc_string(ctx, final_size);
-	if (!result) {
-		DEBUG_ERROR("Fail here, cannot allocate fixme");
-		return;
-	}
-	c_strcpy_s(result->value_string.content,
-		arg1->value_string.size, arg1->value_string.content);
-	c_strcpy_s(result->value_string.content+arg1->value_string.size,
-		arg2->value_string.size, arg2->value_string.content);
-
-	sys_write(1, result->value_string.content, result->value_string.size);
-
-
-}
-
-// END RUNTIME FUNCTIONS
-
-
 // ============================
 //   PARSERS
 // ============================
@@ -666,7 +602,33 @@ INLINE struct ExpressionT* list_get_car(struct ExpressionT* curr) {
 //   INTERPRETER
 // ============================
 
+INLINE u64 interpreter_get_arg_count(struct context* ctx) {
+	return *(u64*)stack_get_ptr(ctx, 0);
+}
+
+
+/** Get argument from stack
+ * arg_pos is order of argument that function will retrieve. Indexing starts
+ * at 1
+ */
+INLINE struct ExpressionT* interpreter_get_arg(struct context* ctx, short arg_pos) {
+	u64* arg_count = (u64*)stack_get_ptr(ctx, 0);
+	if (!arg_count || *arg_count == 0) {
+		DEBUG_ERROR("Abort, stack return NULL");
+		return NULL; // TMP
+	}
+	u64 position = (*arg_count + 1) * 8 - arg_pos*8;
+	struct ExpressionT** exp =
+		(struct ExpressionT**)stack_get_ptr(ctx, position);
+	if (!exp) {
+		DEBUG_ERROR("Abort! stack get returns NULL");
+		return NULL; // Temporary
+	}
+	return *exp;
+}
+
 int interpreter_push_args(struct context* ctx, struct ExpressionT* rest) {
+	u64 arg_count = 0;
 	while (rest) {
 		struct ExpressionT * val = list_get_car(rest);
 		if (!val) {
@@ -679,9 +641,14 @@ int interpreter_push_args(struct context* ctx, struct ExpressionT* rest) {
 			return -1;
 		}
 		rest = list_get_cdr(rest);
+		arg_count++;
 	}
+	stack_push_u64(ctx, arg_count);
 	return 0;
 }
+
+void runtime_concat(struct context* ctx); // TMP 
+
 
 int interpreter_call_function(struct context* ctx, struct ExpressionT* expr) {
 	struct ExpressionT* func = list_get_car(expr);
@@ -693,9 +660,15 @@ int interpreter_call_function(struct context* ctx, struct ExpressionT* expr) {
 		DEBUG_ERROR("Executing function");
 		sys_write(1, func->value_symbol.content, func->value_symbol.size);
 	}
+
+	stack_push_u64(ctx, 0); // Space for return value
+
 	if (interpreter_push_args(ctx, list_get_cdr(expr)) != 0) {
 		return -1;
 	}
+
+	// Let's assume its concat
+	runtime_concat(ctx);
 	return 0;
 }
 
@@ -711,8 +684,80 @@ int execute(struct context* ctx) {
 // ============================
 
 
+// ============================
+//   RUNTIME FUNCTIONS
+// ============================
+
+// struct Expression* _copy_string_heap(
+// 		struct context* ctx, const char* str, u64 str_size) {
+// 
+// }
+// 
+// LOCAL struct Expression* runtime_get_error(struct context* ctx, u64 number) {
+// 	switch (number) {
+// 		case RUNTIME_ARGUMENT_COUNT:
+// 			{
+// 				break;
+// 			}
+// 		default:
+// 			return NULL;
+// 	}
+// }
+void runtime_concat(struct context* ctx) {
+	u64 argcount = interpreter_get_arg_count(ctx);
+	if (argcount != 2) {
+		DEBUG_ERROR("Wrong arg count, fixme message");
+		return;
+	}
+	struct ExpressionT *arg1, *arg2;
+	arg1 = interpreter_get_arg(ctx, 1);
+	arg2 = interpreter_get_arg(ctx, 2);
+	u64 final_size = arg1->value_string.size + arg2->value_string.size;
+	struct ExpressionT* result = alloc_string(ctx, final_size);
+	if (!result) {
+		DEBUG_ERROR("Fail here, cannot allocate fixme");
+		return;
+	}
+	c_strcpy_s(result->value_string.content,
+		arg1->value_string.size, arg1->value_string.content);
+	c_strcpy_s(result->value_string.content+arg1->value_string.size,
+		arg2->value_string.size, arg2->value_string.content);
+
+	sys_write(1, result->value_string.content, result->value_string.size);
+
+
+}
+
+/** Get the length of linked list.
+ * Returns length on success, -1 on failure.
+ */
+i64 runtime_list_length(struct ExpressionT* first) {
+	i64 list_length = 0;
+	while (first && first->value_list.cell) {
+		if (first->expr_type != CONS) { // This list is bad ... error
+			DEBUG_ERROR("Bad list to count");
+			return -1;
+		}
+		if (first->value_list.cell->car == NULL) { // Weird but ok probably
+			DEBUG_ERROR("Empty cons cell ll");
+			return list_length;
+		}
+		list_length++;
+		first = first->value_list.cell->cdr;
+
+	}
+	return list_length;
+}
+
+// ============================
+//   END RUNTIME FUNCTIONS
+// ============================
+
+
+
 void _start() {
-	const char* command = "(concat \"some long string here\"  \"\" \" And this one \" yolo)";
+	//const char* command = "(concat \"some long string here\"  \"\" \" And this one \" yolo)";
+	const char* command = "(concat \"some string \" \" And this one \")";
 	struct context ctx;
 	init_context(&ctx);
 	if (parse_program(&ctx, command, c_strlen(command)) < 0) {
