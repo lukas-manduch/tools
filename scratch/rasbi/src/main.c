@@ -501,6 +501,8 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 					return ret;
 				}
 				if (buf[i] == ')') { // Parsing finished
+					if (out_processed)
+						*out_processed = i+1;
 					return ret;
 				}
 
@@ -672,6 +674,10 @@ int interpreter_call_function(struct context* ctx, struct ExpressionT* expr) {
 	return 0;
 }
 
+u64 interpreter_count_expr_nodes(struct context* ctx) {
+	 return 0;
+}
+
 int execute(struct context* ctx) {
 	if(!ctx->program) {
 		return -1;
@@ -688,6 +694,7 @@ int execute(struct context* ctx) {
 //   RUNTIME FUNCTIONS
 // ============================
 
+
 // struct Expression* _copy_string_heap(
 // 		struct context* ctx, const char* str, u64 str_size) {
 // 
@@ -703,6 +710,7 @@ int execute(struct context* ctx) {
 // 			return NULL;
 // 	}
 // }
+
 void runtime_concat(struct context* ctx) {
 	u64 argcount = interpreter_get_arg_count(ctx);
 	if (argcount != 2) {
@@ -712,6 +720,10 @@ void runtime_concat(struct context* ctx) {
 	struct ExpressionT *arg1, *arg2;
 	arg1 = interpreter_get_arg(ctx, 1);
 	arg2 = interpreter_get_arg(ctx, 2);
+	if (arg1->expr_type != STRING || arg2->expr_type != STRING) {
+		DEBUG_ERROR("Fail here, bad argument types");
+		return;
+	}
 	u64 final_size = arg1->value_string.size + arg2->value_string.size;
 	struct ExpressionT* result = alloc_string(ctx, final_size);
 	if (!result) {
@@ -757,7 +769,7 @@ i64 runtime_list_length(struct ExpressionT* first) {
 
 void _start() {
 	//const char* command = "(concat \"some long string here\"  \"\" \" And this one \" yolo)";
-	const char* command = "(concat \"some string \" \" And this one \")";
+	const char* command = "( concat \"some string \" (concat \"other\" \" string\" ) )";
 	struct context ctx;
 	init_context(&ctx);
 	if (parse_program(&ctx, command, c_strlen(command)) < 0) {
