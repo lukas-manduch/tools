@@ -1,9 +1,11 @@
 CFLAGS := -Wall -Wextra -g
+INCLUDES := -I.
+SOURCE := $(wildcard src/*.c )
 
-out/main.o: src/main.c
-	$(CC) $(CFLAGS) -c $^ -o $@ -std=c17 -nostdlib
+out/main.o: $(SOURCE)
+	$(CC) $(CFLAGS) $(INCLUDES) -c src/main.c -o $@ -std=c17 -nostdlib 
 out/program.exe: out/main.o
-	$(CC) $(CFLAGS) $^ -o $@ -std=c17 -nostdlib
+	$(CC) $(CFLAGS) $(INCLUDES) $^ -o $@ -std=c17 -nostdlib
 
 all: out/program.exe
 

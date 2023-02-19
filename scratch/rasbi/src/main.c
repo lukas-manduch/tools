@@ -312,6 +312,9 @@ void* stack_get_ptr(struct context* ctx, i64 offset) {
 	return &ctx->stack[ctx->_stack_pointer + offset];
 }
 
+// ============================
+//   LIBRARY
+// ============================
 
 INLINE u32 c_strlen(const char* str) {
 	u32 len = 0;
@@ -344,6 +347,13 @@ INLINE i32 is_space(char c) {
 	}
 }
 
+i64 itoa10(i64 value, char* buffer, u64 buf_size) {
+
+}
+
+// ============================
+//   END LIBRARY
+// ============================
 
 /** Allocate empty string expression on context heap.
  *
@@ -678,6 +688,7 @@ u64 interpreter_count_expr_nodes(struct context* ctx) {
 	 return 0;
 }
 
+
 int execute(struct context* ctx) {
 	if(!ctx->program) {
 		return -1;
@@ -766,8 +777,14 @@ i64 runtime_list_length(struct ExpressionT* first) {
 // ============================
 
 
+#if DEBUG == 1
+#include "src/tests.c"
+#endif
 
 void _start() {
+#if DEBUG == 1
+	run_tests();
+#endif
 	//const char* command = "(concat \"some long string here\"  \"\" \" And this one \" yolo)";
 	const char* command = "( concat \"some string \" (concat \"other\" \" string\" ) )";
 	struct context ctx;
