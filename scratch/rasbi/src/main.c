@@ -354,9 +354,51 @@ INLINE i32 is_space(char c) {
 	}
 }
 
-i64 itoa10(i64 value, char* buffer, u64 buf_size) {
 
+/** Writes number in decimal notation to buffer.
+ *  Returns number of characters written or -1 on small buffer
+ */
+i64 c_itoa10(i64 value, char* buffer, u64 buf_size) {
+	// First compute number of digits. Idk how to write logarithms
+	// without stdlib, so let's just be stupid
+	i64 tmp_value = value;
+	u64 digit_count = 0;
+	while (tmp_value != 0) {
+		tmp_value /= 10;
+		digit_count++;
+	}
+	if (value < 0)
+		digit_count++; // For minus sign
+
+	if (digit_count == 0) // Handle 0
+		digit_count = 1;
+
+	if (digit_count > buf_size) {
+		DEBUG_ERROR("Cannot convert number to string (bufsize)");
+		return -1;
+	}
+
+	if (value == 0) {
+		*buffer = '0';
+		return 1;
+	}
+
+	if (value < 0) {
+		*buffer = '-';
+		value *= -1;
+	}
+
+	buffer += digit_count - 1;
+
+	while (value != 0) {
+		u64 reminder = value % 10;
+		value /= 10;
+		*buffer = reminder + '0';
+		buffer--;
+	}
+	return digit_count;
 }
+
 
 // ============================
 //   END LIBRARY
