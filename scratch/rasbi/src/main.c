@@ -328,6 +328,13 @@ void c_strcpy_s(char *dest, u64 destsz, const char *src ) {
 	}
 }
 
+i64 c_strcmp(const char* lhs, const char* rhs) {
+	while (*lhs && (*lhs == *rhs)) {
+		lhs++; rhs++;
+	}
+	return ((i64) *lhs) - ( (i64) *rhs);
+}
+
 INLINE i32 is_alphabet(char c) {
 	if (c >= 'a' && c <= 'z')
 		return TRUE;

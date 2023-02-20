@@ -25,6 +25,8 @@ void test_assert(char bool_value, const char* some_string, const char* content) 
 	}
 	sys_write(1, some_string, c_strlen(some_string));
 	sys_write(1, "\n", 1);
+	if (!bool_value)
+		sys_exit(1);
 }
 
 #define _TEST_FORM_STR(a, b) a ## b
