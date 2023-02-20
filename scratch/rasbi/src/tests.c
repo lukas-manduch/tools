@@ -1,10 +1,27 @@
+void _test_color_red() {
+	sys_write(1, "\033[1;31m", 7);
+}
+
+void _test_color_green() {
+	sys_write(1, "\033[0;32m", 7);
+}
+
+void _test_color_reset() {
+	sys_write(1, "\033[0m", 4);
+}
+
 void test_assert(char bool_value, const char* some_string, const char* content) {
 	if (bool_value) {
-		sys_write(1, "OK\t", 3);
+		_test_color_green();
+		sys_write(1, " OK\t", 4);
+		_test_color_reset();
 		sys_write(1, ".....\t", 6);
 	} else {
+		_test_color_red();
 		sys_write(1, "FAIL\t", 5);
 		sys_write(1, content, c_strlen(content));
+		_test_color_reset();
+		sys_write(1, "  FILE: ", 8);
 	}
 	sys_write(1, some_string, c_strlen(some_string));
 	sys_write(1, "\n", 1);
