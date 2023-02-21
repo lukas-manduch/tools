@@ -74,9 +74,10 @@ struct AllocEntry {
 _Static_assert(sizeof(struct AllocEntry) == 8, "Bad size AllocEntry");
 
 enum ExpressionType {
-	SYMBOL   = 1 << 1, 
+	SYMBOL   = 1 << 1,
 	STRING   = 1 << 2,
 	CONS     = 1 << 3,
+	MEMORY   = 1 << 4,
 };
 
 enum RuntimeErrors {
@@ -94,6 +95,11 @@ struct _listExpression {
 	struct ConsCell* cell;
 };
 
+struct _memoryExpression {
+	u32 size;
+	u32 taken;
+	char mem[];
+};
 
 typedef struct ExpressionT {
 	u32 expr_type;
@@ -102,7 +108,8 @@ typedef struct ExpressionT {
 		u64 value64;
 		struct StringExpression value_string;
 		struct _listExpression value_list;
-		struct StringExpression value_symbol;
+		struct _memoryExpression value_memory;
+		struct StringExpression value_symbol; // Symbols are strings
 	};
 } Expression;
 
@@ -274,7 +281,7 @@ void init_context(struct context* ctx) {
 	for (int i = 0; i < STACK_SIZE; i++)
 		ctx->stack[i] = 0xAA;
 	ctx->_stack_pointer = STACK_SIZE;
-	init_heap(ctx->heap, HEAP_SIZE); 
+	init_heap(ctx->heap, HEAP_SIZE);
 	ctx->symbol_table = NULL;
 	ctx->program = NULL;
 }
@@ -311,6 +318,62 @@ void* stack_get_ptr(struct context* ctx, i64 offset) {
 	}
 	return &ctx->stack[ctx->_stack_pointer + offset];
 }
+// ============================
+//   TYPES
+// ============================
+
+/** Allocate chunk of memory on heap.
+ * Return pointer to new entry, or NULL on error.
+ */
+struct ExpressionT* type_mem_alloc(struct context* ctx, u32 size) {
+	struct ExpressionT* new_expr  =
+		heap_alloc(ctx, sizeof(struct ExpressionT) + size);
+	if (new_expr == NULL) {
+		DEBUG_ERROR("Cannot allocate memory chunk.");
+		return NULL;
+	}
+	new_expr->expr_type = MEMORY;
+	new_expr->value_memory.size = size;
+	new_expr->value_memory.taken = 0;
+	return new_expr;
+}
+
+/**  Get memory address of indexed element, or NULL.
+ */
+u64* type_mem_get_u64(struct ExpressionT* expr, u32 index) {
+	const u32 value_size = sizeof(u64);
+	u32 min_required = (index + 1) * value_size;
+	if (expr->expr_type != MEMORY || expr->value_memory.taken < min_required) {
+		return NULL;
+	}
+	return (u64*)&expr->value_memory.mem[index*value_size];
+}
+
+/** Push back to array on next free index.
+ * Returns index which was taken, or -1 on full array.
+ */
+i64 type_mem_push_u64(struct ExpressionT* expr, u64 value) {
+	const u32 value_size = sizeof(u64);
+	i64 ret = -1;
+	if (expr->expr_type != MEMORY
+		|| (expr->value_memory.taken % value_size != 0)
+		|| (expr->value_memory.taken+value_size) > expr->value_memory.size ) {
+		//-----
+		DEBUG_ERROR("Cannot push value");
+		return ret;
+	}
+
+	ret = expr->value_memory.taken / value_size; // Index of inserted member
+
+	void* address = &expr->value_memory.mem[expr->value_memory.taken];
+	*(u64*)(address) = value;
+	expr->value_memory.taken += value_size;
+	return ret;
+}
+
+// ============================
+//   END TYPES
+// ============================
 
 // ============================
 //   LIBRARY
@@ -551,7 +614,7 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 
 			ret->expr_type = CONS;
 			ret->value_list.cell = NULL;
-			
+
 			while (1) { // Load everythin inside expression
 				i = parser_find_next_char(buf,i+1, count);
 				if (i < 0) {
@@ -786,9 +849,9 @@ int execute(struct context* ctx) {
 
 // struct Expression* _copy_string_heap(
 // 		struct context* ctx, const char* str, u64 str_size) {
-// 
+//
 // }
-// 
+//
 // LOCAL struct Expression* runtime_get_error(struct context* ctx, u64 number) {
 // 	switch (number) {
 // 		case RUNTIME_ARGUMENT_COUNT:
