@@ -708,8 +708,38 @@ int interpreter_push_args(struct context* ctx, struct ExpressionT* rest) {
 	return 0;
 }
 
-void runtime_concat(struct context* ctx); // TMP 
+void runtime_concat(struct context* ctx); // TMP
 
+u64 _interpreter_count_expr_nodes_internal(struct ExpressionT* expr) {
+	if (expr->expr_type != CONS) {
+		return 0;
+	}
+	struct ExpressionT* car = list_get_car(expr);
+	if (car->expr_type != SYMBOL) {
+		DEBUG_ERROR("Parsing some list - unsupported yet");
+		return 0;
+	}
+
+	struct ExpressionT* cons_expr = list_get_cdr(expr);
+	u64 total_children = 0;
+	while (cons_expr) {
+		total_children += _interpreter_count_expr_nodes_internal(
+			list_get_car(cons_expr));
+		cons_expr = list_get_cdr(cons_expr);
+	}
+	return total_children + 1;
+}
+
+/** Return count of function calls in expression and it's children.
+ * This function is recursive.
+ */
+u64 interpreter_count_expr_nodes(struct context* ctx) {
+	if (!ctx->program) {
+		DEBUG_ERROR("Program not parsed");
+		return 0;
+	}
+	return _interpreter_count_expr_nodes_internal(ctx->program);
+}
 
 int interpreter_call_function(struct context* ctx, struct ExpressionT* expr) {
 	struct ExpressionT* func = list_get_car(expr);
@@ -730,11 +760,10 @@ int interpreter_call_function(struct context* ctx, struct ExpressionT* expr) {
 
 	// Let's assume its concat
 	runtime_concat(ctx);
-	return 0;
-}
 
-u64 interpreter_count_expr_nodes(struct context* ctx) {
-	 return 0;
+	//u64 nodesc = interpreter_count_expr_nodes(ctx);
+
+	return 0;
 }
 
 
