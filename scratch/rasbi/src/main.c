@@ -35,6 +35,21 @@ i64 sys_read(u32 fd, const char *buf, u64 count) {
 	return ret;
 }
 
+// These two are really important to be inlined even in debug builds :)
+__attribute__((always_inline)) static inline void sys_stack_push_u64(u64 value)  {
+	__asm__ volatile ("push %0\n\t"
+			:
+			: "rm" (value));
+}
+
+__attribute__((always_inline)) static inline u64 sys_stack_pop_u64() {
+	u64 result;
+	__asm__ volatile ("pop %0\n\t"
+			: "=m" (result)
+			);
+	return result;
+}
+
 void sys_exit(i32 error_code) {
 	__asm__ (
 		"movq $60, %%rax\n\t"
@@ -771,6 +786,49 @@ int interpreter_push_args(struct context* ctx, struct ExpressionT* rest) {
 	return 0;
 }
 
+
+/** Check if given expression is function call.
+ *  Returns either TRUE or FALSE.
+ */
+i64 interpreter_is_expr_function_call(struct ExpressionT* expr) {
+	if (!expr || expr->expr_type != CONS) {
+		return FALSE;
+	}
+	struct ExpressionT* first = list_get_car(expr);
+	if (first && first->expr_type == SYMBOL) {
+		return TRUE;
+	}
+	return FALSE;
+}
+
+
+/** Get nested function call pointer.
+ * Positions are indexed from 1. Position 2 means - try to find second function
+ * call and return its pointer.
+ *
+ * Returns pointer to function call or NULL
+ */
+struct ExpressionT* interpreter_get_nested_func(
+		struct ExpressionT* expr, u64 position) {
+	if (!expr || expr->expr_type != CONS) {
+		DEBUG_ERROR("Expression is not a list (get nested func)");
+		return NULL;
+	}
+	u64 found_count = 0;
+	struct ExpressionT* current = (expr);
+	while (current) {
+		struct ExpressionT* value = list_get_car(current);
+		if (interpreter_is_expr_function_call(value)) {
+			found_count++;
+			if (found_count == position) {
+				return value;
+			}
+		}
+		current = list_get_cdr(current);
+	}
+	return NULL;
+}
+
 void runtime_concat(struct context* ctx); // TMP
 
 u64 _interpreter_count_expr_nodes_internal(struct ExpressionT* expr) {
@@ -823,10 +881,51 @@ int interpreter_call_function(struct context* ctx, struct ExpressionT* expr) {
 
 	// Let's assume its concat
 	runtime_concat(ctx);
-
-	//u64 nodesc = interpreter_count_expr_nodes(ctx);
-
 	return 0;
+}
+
+
+
+struct ExpressionT* interpreter_build_parent_graph(struct context* ctx) {
+	u64 node_count = interpreter_count_expr_nodes(ctx);
+	if (!node_count) {
+		DEBUG_ERROR("Parent graph err");
+		return NULL;
+	}
+	struct ExpressionT* graph = type_mem_alloc(
+		ctx, node_count*sizeof(struct ExpressionT*)); // pointer size
+
+
+	struct ExpressionT* current = NULL;
+	u64 position = 0;
+
+	sys_stack_push_u64(NULL);
+	sys_stack_push_u64(NULL);
+
+	sys_stack_push_u64((u64)ctx->program);
+	sys_stack_push_u64(0);
+
+	while(1) {
+		// Stack shouldn't be used here
+		position = sys_stack_pop_u64();
+		current = (struct ExpressionT*)sys_stack_pop_u64();
+
+		// Stack is available
+		if (current == NULL && position == 0) { // Everything is done
+			break;
+		}
+	}
+
+	// if (interpreter_is_expr_function_call(current)) {
+	// 	type_mem_push_u64(graph, (u64)current);
+	// 	// push on stack
+
+	// 	for (u64 i = 0; 1; i++) {
+
+	// 	interpreter_get_nested_func(current, 1);
+	// 	}
+	// }
+	return graph;
 }
 
 
@@ -834,6 +933,8 @@ int execute(struct context* ctx) {
 	if(!ctx->program) {
 		return -1;
 	}
+
+	interpreter_build_parent_graph(ctx);
 	return interpreter_call_function(ctx, ctx->program);
 }
 
