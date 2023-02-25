@@ -357,6 +357,13 @@ i64 c_strcmp(const char* lhs, const char* rhs) {
 	return ((i64) *lhs) - ( (i64) *rhs);
 }
 
+void c_memset(void *dest, unsigned char ch, u64 count) {
+	unsigned char *ptr = dest;
+	while(count--) {
+		*(ptr++) = ch;
+	}
+}
+
 INLINE i32 is_alphabet(char c) {
 	if (c >= 'a' && c <= 'z')
 		return TRUE;
@@ -489,9 +496,18 @@ i64 type_mem_get_len(struct ExpressionT* expr) {
 	return -1;
 }
 
-// i64 type_mem_memset(struct ExpressionT* expr, u64 length, unsigned char value) {
-//
-// }
+/** Set mem chunk of length to value and set used size to length
+ * Returns 0 on success or -1 on failure
+ */
+i64 type_mem_memset(struct ExpressionT* expr, unsigned char value, u64 length) {
+	if (!expr
+		|| expr->expr_type != MEMORY
+		|| expr->value_memory.size < length) {
+		return -1;
+	}
+	expr->value_memory.taken = length;
+	c_memset(expr->value_memory.mem, value, length);
+}
 
 // ============================
 //   END TYPES

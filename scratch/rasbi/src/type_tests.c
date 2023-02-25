@@ -19,11 +19,16 @@ void run_test_types_mem() {
 	TEST_ASSERT(*type_mem_get_u64(mem, 2) == 0);
 	*type_mem_get_u64(mem, 2) = 1;
 	TEST_ASSERT(*type_mem_get_u64(mem, 2) == 1);
+
 	// fail
 	TEST_ASSERT(type_mem_get_u64(mem, 3) == NULL);
 	TEST_ASSERT(type_mem_get_u64(mem, 4) == NULL);
+	TEST_ASSERT(type_mem_memset(mem, 1, sizeof(u64)*5) == -1);
+	// end fail
 
-	/// TEST
+	TEST_ASSERT(type_mem_memset(mem, 1, sizeof(u64)*4) == 0);
+	TEST_ASSERT(((*type_mem_get_u64(mem, 1))&0xFF) == 1);
+
 }
 void run_tests_types() {
 	run_test_types_mem();

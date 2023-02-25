@@ -63,6 +63,15 @@ static inline void run_test_c_itoa10() {
 	TEST_ASSERT(ret == -1ull);
 }
 
+static inline void run_test_c_memset() {
+	char aa[] = {7 , 7 , 7 , 8};
+	c_memset(aa+1, 4, 2);
+	TEST_ASSERT(aa[0] == 7);
+	TEST_ASSERT(aa[1] == 4);
+	TEST_ASSERT(aa[2] == 4);
+	TEST_ASSERT(aa[3] == 8);
+}
+
 void run_tests_lib() {
 	TEST_ASSERT(c_strlen("Ahoj") == 4);
 	TEST_ASSERT(c_strlen("") == 0);
@@ -70,4 +79,5 @@ void run_tests_lib() {
 	run_test_is_alphabet();
 	run_test_c_strcmp();
 	run_test_c_itoa10();
+	run_test_c_memset();
 }
