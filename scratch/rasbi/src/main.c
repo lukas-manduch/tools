@@ -333,62 +333,6 @@ void* stack_get_ptr(struct context* ctx, i64 offset) {
 	}
 	return &ctx->stack[ctx->_stack_pointer + offset];
 }
-// ============================
-//   TYPES
-// ============================
-
-/** Allocate chunk of memory on heap.
- * Return pointer to new entry, or NULL on error.
- */
-struct ExpressionT* type_mem_alloc(struct context* ctx, u32 size) {
-	struct ExpressionT* new_expr  =
-		heap_alloc(ctx, sizeof(struct ExpressionT) + size);
-	if (new_expr == NULL) {
-		DEBUG_ERROR("Cannot allocate memory chunk.");
-		return NULL;
-	}
-	new_expr->expr_type = MEMORY;
-	new_expr->value_memory.size = size;
-	new_expr->value_memory.taken = 0;
-	return new_expr;
-}
-
-/**  Get memory address of indexed element, or NULL.
- */
-u64* type_mem_get_u64(struct ExpressionT* expr, u32 index) {
-	const u32 value_size = sizeof(u64);
-	u32 min_required = (index + 1) * value_size;
-	if (expr->expr_type != MEMORY || expr->value_memory.taken < min_required) {
-		return NULL;
-	}
-	return (u64*)&expr->value_memory.mem[index*value_size];
-}
-
-/** Push back to array on next free index.
- * Returns index which was taken, or -1 on full array.
- */
-i64 type_mem_push_u64(struct ExpressionT* expr, u64 value) {
-	const u32 value_size = sizeof(u64);
-	i64 ret = -1;
-	if (expr->expr_type != MEMORY
-		|| (expr->value_memory.taken % value_size != 0)
-		|| (expr->value_memory.taken+value_size) > expr->value_memory.size ) {
-		//-----
-		DEBUG_ERROR("Cannot push value");
-		return ret;
-	}
-
-	ret = expr->value_memory.taken / value_size; // Index of inserted member
-
-	void* address = &expr->value_memory.mem[expr->value_memory.taken];
-	*(u64*)(address) = value;
-	expr->value_memory.taken += value_size;
-	return ret;
-}
-
-// ============================
-//   END TYPES
-// ============================
 
 // ============================
 //   LIBRARY
@@ -482,6 +426,76 @@ i64 c_itoa10(i64 value, char* buffer, u64 buf_size) {
 //   END LIBRARY
 // ============================
 
+// ============================
+//   TYPES
+// ============================
+
+/** Allocate chunk of memory on heap.
+ * Return pointer to new entry, or NULL on error.
+ */
+struct ExpressionT* type_mem_alloc(struct context* ctx, u32 size) {
+	struct ExpressionT* new_expr  =
+		heap_alloc(ctx, sizeof(struct ExpressionT) + size);
+	if (new_expr == NULL) {
+		DEBUG_ERROR("Cannot allocate memory chunk.");
+		return NULL;
+	}
+	new_expr->expr_type = MEMORY;
+	new_expr->value_memory.size = size;
+	new_expr->value_memory.taken = 0;
+	return new_expr;
+}
+
+/**  Get memory address of indexed element, or NULL.
+ */
+u64* type_mem_get_u64(struct ExpressionT* expr, u32 index) {
+	const u32 value_size = sizeof(u64);
+	u32 min_required = (index + 1) * value_size;
+	if (expr->expr_type != MEMORY || expr->value_memory.taken < min_required) {
+		return NULL;
+	}
+	return (u64*)&expr->value_memory.mem[index*value_size];
+}
+
+/** Push back to array on next free index.
+ * Returns index which was taken, or -1 on full array.
+ */
+i64 type_mem_push_u64(struct ExpressionT* expr, u64 value) {
+	const u32 value_size = sizeof(u64);
+	i64 ret = -1;
+	if (expr->expr_type != MEMORY
+		|| (expr->value_memory.taken % value_size != 0)
+		|| (expr->value_memory.taken+value_size) > expr->value_memory.size ) {
+		//-----
+		DEBUG_ERROR("Cannot push value");
+		return ret;
+	}
+
+	ret = expr->value_memory.taken / value_size; // Index of inserted member
+
+	void* address = &expr->value_memory.mem[expr->value_memory.taken];
+	*(u64*)(address) = value;
+	expr->value_memory.taken += value_size;
+	return ret;
+}
+
+/** Get length of taken memory in bytes.
+ * Returns number of used bytes or -1 on error
+ */
+i64 type_mem_get_len(struct ExpressionT* expr) {
+	if(expr && expr->expr_type == MEMORY) {
+		return expr->value_memory.taken;
+	}
+	return -1;
+}
+
+// i64 type_mem_memset(struct ExpressionT* expr, u64 length, unsigned char value) {
+//
+// }
+
+// ============================
+//   END TYPES
+// ============================
 /** Allocate empty string expression on context heap.
  *
  */
@@ -885,7 +899,6 @@ int interpreter_call_function(struct context* ctx, struct ExpressionT* expr) {
 }
 
 
-
 struct ExpressionT* interpreter_build_parent_graph(struct context* ctx) {
 	u64 node_count = interpreter_count_expr_nodes(ctx);
 	if (!node_count) {
@@ -895,9 +908,12 @@ struct ExpressionT* interpreter_build_parent_graph(struct context* ctx) {
 	struct ExpressionT* graph = type_mem_alloc(
 		ctx, node_count*sizeof(struct ExpressionT*)); // pointer size
 
+	type_mem_push_u64(graph, 0); // Parent of first is 0
 
 	struct ExpressionT* current = NULL;
+	struct ExpressionT* tmp = NULL;
 	u64 position = 0;
+	i64 push_ret = -1;
 
 	sys_stack_push_u64(NULL);
 	sys_stack_push_u64(NULL);
@@ -910,21 +926,31 @@ struct ExpressionT* interpreter_build_parent_graph(struct context* ctx) {
 		position = sys_stack_pop_u64();
 		current = (struct ExpressionT*)sys_stack_pop_u64();
 
-		// Stack is available
 		if (current == NULL && position == 0) { // Everything is done
 			break;
 		}
+
+		tmp = interpreter_get_nested_func(current, ++position);
+		if (tmp == NULL) { // There is nowhere to dive deeper, so
+				   // let's go one up
+			continue;
+		}
+
+		push_ret = type_mem_push_u64(graph, (u64)current); // We are pushing parent
+		if (push_ret == -1) {
+			DEBUG_ERROR("Cannot build graph (maybe cleanup)");
+			return NULL;
+		}
+
+		// We found next function
+		// First preserve current position
+		sys_stack_push_u64((u64)current);
+		sys_stack_push_u64(position);
+		// Now set up for next iteration
+		sys_stack_push_u64((u64)tmp);
+		sys_stack_push_u64(0);
 	}
 
-	// if (interpreter_is_expr_function_call(current)) {
-	// 	type_mem_push_u64(graph, (u64)current);
-	// 	// push on stack
-
-	// 	for (u64 i = 0; 1; i++) {
-
-	// 	interpreter_get_nested_func(current, 1);
-	// 	}
-	// }
 	return graph;
 }
 
@@ -934,7 +960,11 @@ int execute(struct context* ctx) {
 		return -1;
 	}
 
-	interpreter_build_parent_graph(ctx);
+	struct ExpressionT* parents = interpreter_build_parent_graph(ctx);
+	if (!parents) {
+		return -1;
+	}
+	u64 current_function;
 	return interpreter_call_function(ctx, ctx->program);
 }
 
