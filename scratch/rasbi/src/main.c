@@ -140,8 +140,9 @@ struct context {
 
 	char stack[STACK_SIZE];
 	unsigned short _stack_pointer;
-	struct ExpressionT* symbol_table; // This shall be CONS reference
 	struct ExpressionT* program; // This shall be CONS reference
+	struct ExpressionT* parent_table;
+	struct ExpressionT* return_values;
 };
 
 static inline u64 round8(u64 num) {
@@ -297,8 +298,9 @@ void init_context(struct context* ctx) {
 		ctx->stack[i] = 0xAA;
 	ctx->_stack_pointer = STACK_SIZE;
 	init_heap(ctx->heap, HEAP_SIZE);
-	ctx->symbol_table = NULL;
 	ctx->program = NULL;
+	ctx->parent_table = NULL;
+	ctx->return_values = NULL;
 }
 
 
@@ -332,6 +334,21 @@ void* stack_get_ptr(struct context* ctx, i64 offset) {
 		return NULL;
 	}
 	return &ctx->stack[ctx->_stack_pointer + offset];
+}
+
+
+/** Returns pointer to stack, to be preserved.
+ * This pointer can later be used to reset stack
+ */
+u64 stack_get_sp(struct context* ctx) {
+	return ctx->_stack_pointer;
+}
+
+/** Set stack pointer to sp.
+ * Sp should be value returned by stack_get_sp
+ */
+void stack_set_sp(struct context* ctx, u64 sp) {
+	ctx->_stack_pointer = sp;
 }
 
 // ============================
@@ -507,6 +524,7 @@ i64 type_mem_memset(struct ExpressionT* expr, unsigned char value, u64 length) {
 	}
 	expr->value_memory.taken = length;
 	c_memset(expr->value_memory.mem, value, length);
+	return 0;
 }
 
 // ============================
@@ -775,7 +793,6 @@ INLINE u64 interpreter_get_arg_count(struct context* ctx) {
 	return *(u64*)stack_get_ptr(ctx, 0);
 }
 
-
 /** Get argument from stack
  * arg_pos is order of argument that function will retrieve. Indexing starts
  * at 1
@@ -796,26 +813,24 @@ INLINE struct ExpressionT* interpreter_get_arg(struct context* ctx, short arg_po
 	return *exp;
 }
 
-int interpreter_push_args(struct context* ctx, struct ExpressionT* rest) {
-	u64 arg_count = 0;
-	while (rest) {
-		struct ExpressionT * val = list_get_car(rest);
-		if (!val) {
-			DEBUG_ERROR("Invalid function call, (parser error)");
-			return -1;
-		}
-		void *stackp = stack_push_u64(ctx, (u64)val);
-		if (!stackp) {
-			DEBUG_ERROR("Stack push failed");
-			return -1;
-		}
-		rest = list_get_cdr(rest);
-		arg_count++;
+/** Get address for return value. This is very hacky and will be replaced.
+ *
+ */
+struct ExpressionT** interpreter_get_ret_addr(struct context* ctx) {
+	u64 count = interpreter_get_arg_count(ctx);
+	if (count == 0) {
+		DEBUG_ERROR("Abort, stack return NULL");
+		return NULL; // TMP
 	}
-	stack_push_u64(ctx, arg_count);
-	return 0;
+	u64 position = (count + 1) *8;
+	struct ExpressionT** exp =
+		(struct ExpressionT**)stack_get_ptr(ctx, position);
+	if (!exp) {
+		DEBUG_ERROR("Abort! stack get returns NULL");
+		return NULL; // Temporary
+	}
+	return exp;
 }
-
 
 /** Check if given expression is function call.
  *  Returns either TRUE or FALSE.
@@ -829,6 +844,84 @@ i64 interpreter_is_expr_function_call(struct ExpressionT* expr) {
 		return TRUE;
 	}
 	return FALSE;
+}
+
+/** This function goes through parent tree and finds nth node pointing to expr
+ *  Returns index of nth child on success or 0 on error. 0 is never valid as
+ *  index of child, because 0 doesn't have any parent and points to itself.
+ *
+ */
+u64 interpreter_find_nth_child_func_index(
+		struct context* ctx, struct ExpressionT* expr, u64 n) {
+
+	struct ExpressionT* parents = ctx->parent_table;
+	if (parents == NULL || parents->expr_type != MEMORY) {
+		DEBUG_ERROR("Nth child index bad parent_table");
+		return 0;
+	}
+	u32 parent_len = type_mem_get_len(parents) / sizeof(u64);
+	u64 found_children = 0;
+
+	for (u32 i = 0; i < parent_len; i++) {
+		u64* value = type_mem_get_u64(parents, i);
+		// Value can't be NULL
+		if (((struct ExpressionT*)*value) == expr)
+			found_children++;
+
+		if (found_children == n)
+			return i;
+	}
+	return 0;
+}
+
+/** Push arguments on stack and resolve function return values.
+ *  expr is pointer to function call in syntax tree.
+ */
+i64 interpreter_push_args(struct context* ctx, struct ExpressionT* expr) {
+	u64 arg_count = 0;
+	u64 function_calls = 0;
+
+	struct ExpressionT* rest = list_get_cdr(expr);
+
+	if(!expr || expr->expr_type != CONS ||
+			list_get_car(expr)->expr_type != SYMBOL) {
+		DEBUG_ERROR("Invalid function push args");
+		return -1;
+
+	}
+
+	while (rest) {
+		struct ExpressionT * val = list_get_car(rest);
+		if (!val) {
+			DEBUG_ERROR("Invalid function call, (parser error)");
+			return -1;
+		}
+
+		// If this is function call, we have to replace the literal
+		// function call with return value of func call.
+		if (interpreter_is_expr_function_call(val)) {
+			function_calls++;
+			u64 child_index = interpreter_find_nth_child_func_index(
+					ctx, expr, function_calls);
+			if (child_index == 0) {
+				DEBUG_ERROR("unresolved deps in call graph");
+				return -1;
+			}
+			// Pull real return value
+			val = (struct ExpressionT*)
+				(*type_mem_get_u64(ctx->return_values, child_index));
+		}
+
+		void *stackp = stack_push_u64(ctx, (u64)val);
+		if (!stackp) {
+			DEBUG_ERROR("Stack push failed");
+			return -1;
+		}
+		rest = list_get_cdr(rest);
+		arg_count++;
+	}
+	stack_push_u64(ctx, arg_count);
+	return 0;
 }
 
 
@@ -892,28 +985,75 @@ u64 interpreter_count_expr_nodes(struct context* ctx) {
 	return _interpreter_count_expr_nodes_internal(ctx->program);
 }
 
-int interpreter_call_function(struct context* ctx, struct ExpressionT* expr) {
+/** Retrieve function by index.
+ * Currently this causes recursive search, but I don't care about speed rn.
+ */
+struct ExpressionT* interpreter_get_function_by_index(
+		struct context* ctx, u64 order) {
+
+	struct ExpressionT* node = ctx->program;
+	u64 index = 0;
+	u64 counted = 0;
+
+	while (order != index) {
+		int i = 0;
+		while (1) {
+			i++; // nested functions start at 1
+			struct ExpressionT* tmp =
+				interpreter_get_nested_func(node, i);
+
+			if (!tmp) { // Order arg must be out of range
+				DEBUG_ERROR("Cannot find by index");
+				return NULL;
+			}
+
+			u64 current_node_count =
+				_interpreter_count_expr_nodes_internal(tmp);
+
+			if ((current_node_count + counted) >= order) {
+				// This is subtree we want to dive into
+				index = counted + 1;
+				node = tmp;
+				break;
+
+			} else {
+				counted += current_node_count;
+			}
+		}
+	}
+	return node;
+}
+
+
+struct ExpressionT* interpreter_call_function(
+		struct context* ctx, struct ExpressionT* expr) {
+	struct ExpressionT* ret = NULL;
 	struct ExpressionT* func = list_get_car(expr);
 	if (!func) {
 		DEBUG_ERROR("Func error");
-		return -1;
+		return ret;
 	}
 	if (func->expr_type == SYMBOL) {
 		DEBUG_ERROR("Executing function");
 		sys_write(1, func->value_symbol.content, func->value_symbol.size);
 	}
 
-	stack_push_u64(ctx, 0); // Space for return value
+	u64 stack_pointer = stack_get_sp(ctx);
+	void* ret_val_pointer = stack_push_u64(ctx, 0); // Space for return value
 
-	if (interpreter_push_args(ctx, list_get_cdr(expr)) != 0) {
-		return -1;
+	if (interpreter_push_args(ctx, expr) != 0) {
+		goto end;
 	}
 
 	// Let's assume its concat
 	runtime_concat(ctx);
-	return 0;
-}
 
+	// Now get return value
+	ret = *((struct ExpressionT**)ret_val_pointer);
+end:
+	stack_set_sp(ctx, stack_pointer);
+	return ret;
+}
 
 struct ExpressionT* interpreter_build_parent_graph(struct context* ctx) {
 	u64 node_count = interpreter_count_expr_nodes(ctx);
@@ -970,18 +1110,46 @@ struct ExpressionT* interpreter_build_parent_graph(struct context* ctx) {
 	return graph;
 }
 
-
 int execute(struct context* ctx) {
 	if(!ctx->program) {
 		return -1;
 	}
 
 	struct ExpressionT* parents = interpreter_build_parent_graph(ctx);
-	if (!parents) {
+	struct ExpressionT* ret_vals = type_mem_alloc(ctx, type_mem_get_len(parents));
+	if (!parents || !ret_vals) {
 		return -1;
 	}
-	u64 current_function;
-	return interpreter_call_function(ctx, ctx->program);
+
+	if (type_mem_memset(ret_vals, 0, type_mem_get_len(parents)) == -1) {
+		// There is some problem with memory
+		return -1;
+	}
+
+	ctx->parent_table = parents;
+	ctx->return_values = ret_vals;
+
+	// Start with last function
+	u64 current_function = type_mem_get_len(parents) / sizeof(u64) - 1;
+
+	// Retrieve function
+	while (1) {
+		struct ExpressionT* current_f =
+			interpreter_get_function_by_index(ctx, current_function);
+		struct ExpressionT* fret = NULL;
+		// Check how to call this function
+		fret = interpreter_call_function(ctx, current_f);
+		if (fret == NULL) {
+			DEBUG_ERROR("Error calling function");
+			return -1;
+		}
+		*type_mem_get_u64(ret_vals, current_function) = (u64)fret;
+		// Save return value
+		if (current_function == 0) { // This was the last one
+			return 0;
+		}
+		current_function--;
+	}
 }
 
 // ============================
@@ -1034,9 +1202,9 @@ void runtime_concat(struct context* ctx) {
 	c_strcpy_s(result->value_string.content+arg1->value_string.size,
 		arg2->value_string.size, arg2->value_string.content);
 
+	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
 	sys_write(1, result->value_string.content, result->value_string.size);
-
-
+	*ret_place = result;
 }
 
 /** Get the length of linked list.
@@ -1074,7 +1242,7 @@ void _start() {
 	run_tests();
 #endif
 	//const char* command = "(concat \"some long string here\"  \"\" \" And this one \" yolo)";
-	const char* command = "( concat \"some string \" (concat \"other\" \" string\" ) )";
+	const char* command = "( concat (concat \"some \" \" string \") (concat \"other\" \" string\" ) )";
 	struct context ctx;
 	init_context(&ctx);
 	if (parse_program(&ctx, command, c_strlen(command)) < 0) {

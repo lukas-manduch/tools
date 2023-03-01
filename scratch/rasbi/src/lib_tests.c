@@ -26,7 +26,6 @@ static inline void run_test_c_itoa10() {
 	char buffer[buf_size];
 
 
-
 	ret = c_itoa10(0, buffer, buf_size);
 	TEST_ASSERT(ret == 1);
 	TEST_ASSERT(c_strcmp(buffer, "0") == 0);
