@@ -11,6 +11,7 @@
 #define U32_MAX 0xffffffff
 #define u64 unsigned long long
 #define u32 unsigned int
+#define u16 unsigned short
 #define i32 int
 #define i64 signed long long
 
@@ -18,6 +19,7 @@ _Static_assert(sizeof(u64) == 8, "Bad size");
 _Static_assert(sizeof(i64) == 8, "Bad size");
 _Static_assert(sizeof(u32) == 4, "Bad size");
 _Static_assert(sizeof(i32) == 4, "Bad size");
+_Static_assert(sizeof(u16) == 2, "Bad size");
 
 i64 sys_read(u32 fd, const char *buf, u64 count) {
 	i64 ret = 0;
@@ -208,7 +210,6 @@ void print_expression(const struct ExpressionT* expression) {
 #define DEBUG_ERROR(str) __debug_print(str)
 #endif
 
-
 void* heap_alloc(struct context* context, u64 size) {
 	u32 minimal_alloc = sizeof(struct AllocEntry) + 8;
 	u32 requested = round8(size);
@@ -254,7 +255,6 @@ void* heap_alloc(struct context* context, u64 size) {
 	entry->pad2 = 0xde;
 	return (char*)ret + sizeof(struct AllocEntry);
 }
-
 
 LOCAL int init_heap(void* data, u64 size) {
 	if (size <= sizeof(struct AllocEntry)) {
@@ -303,7 +303,6 @@ void init_context(struct context* ctx) {
 	ctx->return_values = NULL;
 }
 
-
 LOCAL void* stack_push_var(struct context* ctx, u64 size) {
 	if ((size % 8) != 0) {
 		return NULL; // Unaligned alloc, not supported
@@ -335,7 +334,6 @@ void* stack_get_ptr(struct context* ctx, i64 offset) {
 	}
 	return &ctx->stack[ctx->_stack_pointer + offset];
 }
-
 
 /** Returns pointer to stack, to be preserved.
  * This pointer can later be used to reset stack
@@ -400,7 +398,6 @@ INLINE i32 is_space(char c) {
 	}
 }
 
-
 /** Writes number in decimal notation to buffer.
  *  Returns number of characters written or -1 on small buffer
  */
@@ -454,6 +451,19 @@ i64 c_itoa10(i64 value, char* buffer, u64 buf_size) {
 //   TYPES
 // ============================
 
+// ------ MEMORY -------
+
+// Memory type is just a chunk of memory allocated on heap.  There are some
+// convenience functions to index it as array of 64 bit integers, because it is
+// very often used to store pointers.
+
+INLINE u32 type_ismem(struct ExpressionT* expr) {
+	if (expr && ((expr->expr_type) & MEMORY)) {
+		return TRUE;
+	}
+	return FALSE;
+}
+
 /** Allocate chunk of memory on heap.
  * Return pointer to new entry, or NULL on error.
  */
@@ -475,7 +485,7 @@ struct ExpressionT* type_mem_alloc(struct context* ctx, u32 size) {
 u64* type_mem_get_u64(struct ExpressionT* expr, u32 index) {
 	const u32 value_size = sizeof(u64);
 	u32 min_required = (index + 1) * value_size;
-	if (expr->expr_type != MEMORY || expr->value_memory.taken < min_required) {
+	if (!type_ismem(expr) || expr->value_memory.taken < min_required) {
 		return NULL;
 	}
 	return (u64*)&expr->value_memory.mem[index*value_size];
@@ -487,7 +497,7 @@ u64* type_mem_get_u64(struct ExpressionT* expr, u32 index) {
 i64 type_mem_push_u64(struct ExpressionT* expr, u64 value) {
 	const u32 value_size = sizeof(u64);
 	i64 ret = -1;
-	if (expr->expr_type != MEMORY
+	if (!type_ismem(expr)
 		|| (expr->value_memory.taken % value_size != 0)
 		|| (expr->value_memory.taken+value_size) > expr->value_memory.size ) {
 		//-----
@@ -507,7 +517,7 @@ i64 type_mem_push_u64(struct ExpressionT* expr, u64 value) {
  * Returns number of used bytes or -1 on error
  */
 i64 type_mem_get_len(struct ExpressionT* expr) {
-	if(expr && expr->expr_type == MEMORY) {
+	if(type_ismem(expr)) {
 		return expr->value_memory.taken;
 	}
 	return -1;
@@ -517,8 +527,7 @@ i64 type_mem_get_len(struct ExpressionT* expr) {
  * Returns 0 on success or -1 on failure
  */
 i64 type_mem_memset(struct ExpressionT* expr, unsigned char value, u64 length) {
-	if (!expr
-		|| expr->expr_type != MEMORY
+	if (!type_ismem(expr)
 		|| expr->value_memory.size < length) {
 		return -1;
 	}
@@ -855,7 +864,7 @@ u64 interpreter_find_nth_child_func_index(
 		struct context* ctx, struct ExpressionT* expr, u64 n) {
 
 	struct ExpressionT* parents = ctx->parent_table;
-	if (parents == NULL || parents->expr_type != MEMORY) {
+	if (!type_ismem(parents)) {
 		DEBUG_ERROR("Nth child index bad parent_table");
 		return 0;
 	}
@@ -923,7 +932,6 @@ i64 interpreter_push_args(struct context* ctx, struct ExpressionT* expr) {
 	stack_push_u64(ctx, arg_count);
 	return 0;
 }
-
 
 /** Get nested function call pointer.
  * Positions are indexed from 1. Position 2 means - try to find second function
@@ -1023,7 +1031,6 @@ struct ExpressionT* interpreter_get_function_by_index(
 	}
 	return node;
 }
-
 
 struct ExpressionT* interpreter_call_function(
 		struct context* ctx, struct ExpressionT* expr) {
