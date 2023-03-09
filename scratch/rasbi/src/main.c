@@ -95,6 +95,7 @@ enum ExpressionType {
 	STRING   = 1 << 2,
 	CONS     = 1 << 3,
 	MEMORY   = 1 << 4,
+	ASSOCA   = 1 << 5,
 };
 
 enum RuntimeErrors {
@@ -372,10 +373,23 @@ i64 c_strcmp(const char* lhs, const char* rhs) {
 	return ((i64) *lhs) - ( (i64) *rhs);
 }
 
+i32 c_strncmp(const char* lhs, const char* rhs, u64 count) {
+
+}
+
 void c_memset(void *dest, unsigned char ch, u64 count) {
 	unsigned char *ptr = dest;
 	while(count--) {
 		*(ptr++) = ch;
+	}
+}
+
+void c_memcpy(void* dest, const void* src, u64 count) {
+	char* destc = dest;
+	const char* srcc = src;
+	while (count--) {
+		*destc = *srcc;
+		destc++; srcc++;
 	}
 }
 
@@ -456,7 +470,14 @@ i64 c_itoa10(i64 value, char* buffer, u64 buf_size) {
 // Memory type is just a chunk of memory allocated on heap.  There are some
 // convenience functions to index it as array of 64 bit integers, because it is
 // very often used to store pointers.
+//
+// Memory is sometimes also used as subtype for other types, so this must be
+// accounted for when for example calling type_ismem (that is true also for
+// different types)
 
+/** Safely check if expr is chunk of memory
+ *
+ */
 INLINE u32 type_ismem(struct ExpressionT* expr) {
 	if (expr && ((expr->expr_type) & MEMORY)) {
 		return TRUE;
@@ -478,6 +499,16 @@ struct ExpressionT* type_mem_alloc(struct context* ctx, u32 size) {
 	new_expr->value_memory.size = size;
 	new_expr->value_memory.taken = 0;
 	return new_expr;
+}
+
+/** Get arbitrary location from mem chunk as pointer.
+ * Returns NULL if index is out of range, or expr is not valid mem chunk
+ */
+INLINE void* type_mem_get_loc(struct ExpressionT* expr, u32 index) {
+	if (!type_ismem(expr) || expr->value_memory.taken <= index) {
+		return NULL;
+	}
+	return &expr->value_memory.mem[index];
 }
 
 /**  Get memory address of indexed element, or NULL.
@@ -536,9 +567,211 @@ i64 type_mem_memset(struct ExpressionT* expr, unsigned char value, u64 length) {
 	return 0;
 }
 
+// ------ VARCHAR ------
+
+struct Varchar {
+	u16 length;
+	unsigned char content[];
+};
+
+/** Get size of varchar entry rounded up to 8 bytes
+ */
+u64 type_varchar_get_size(struct Varchar* varchar) {
+	u64 result = sizeof(struct Varchar) + varchar->length;
+	if ((result % 8) == 0) {
+		return result;
+	}
+	result += 8 - (result % 8);
+	return result;
+}
+
+/** Create varchar entry in dest with source content.
+ */
+void type_varchar_create(void* dest, const char* source, u64 source_length) {
+	struct Varchar* destination = (struct Varchar*)dest;
+	destination->length = source_length;
+	// TODO copy
+	c_memcpy(destination->content, source, source_length);
+}
+
+// ------ ASSOCA ------
+
+// Associative array
+//
+
+struct AssocaHeader {
+	// Tells how many entries are stored in "entries" array
+	u16 entry_count;
+	// Tells how many entries there could potentially be, before this
+	// structure would need to be reallocated (before you would hit
+	// something else by accessing larger "entries" index).  It doesn't
+	// mean that there is enough space to store strings in memory.
+	u16 entry_max;
+	u32 _pad1;
+	struct Varchar* entries[];
+};
+
+/** Check whether expression is assoca.
+ * Returns TRUE if is and FALSE if it is not
+ */
+u32 type_isassoca(struct ExpressionT* expr) {
+	if (type_ismem(expr) && expr->expr_type & ASSOCA) {
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/** Get pointer to Assoca Header structure
+ */
+struct AssocaHeader* type_assoca_get_header(struct ExpressionT* expr) {
+	if (!type_isassoca(expr)) {
+		return NULL;
+	}
+	return (struct AssocaHeader*)type_mem_get_loc(expr, 0);
+}
+
+/** Compute assoca header size (used and unused space together)
+ */
+u64 _type_assoca_get_header_size(struct AssocaHeader* header) {
+	return sizeof(struct AssocaHeader) +
+		header->entry_max*sizeof(struct Varchar*);
+}
+
+/** Insert value on any available position in header.
+ * On success return 0. If header is full, return 1.
+ * In future, this should also sort exisiting entries
+ */
+u64 _type_assoca_header_insert(struct AssocaHeader* header, u64 value) {
+	if (header->entry_count >= header->entry_max) {
+		return 1;
+	}
+	u16 target_index = header->entry_count++;
+	header->entries[target_index] = (struct Varchar*)value;
+	return 0;
+}
+
+/** Allocate associative array with default size
+ */
+struct ExpressionT* type_assoca_alloc(struct context* ctx) {
+	// Size to fit approximately def_count english words
+	const u32 def_count = 6;
+	u32 default_size = sizeof(struct AssocaHeader)
+		+ def_count*sizeof(u64)  // Entries in AssocaHeader
+		+ def_count*sizeof(u64) // References in dictionary
+		+ def_count*8 // Average length of word (My estimate :) )
+		+ def_count*sizeof(struct Varchar);
+	default_size = round8(default_size);
+	struct ExpressionT* result = type_mem_alloc(ctx, default_size);
+	if (!result) {
+		DEBUG_ERROR("cannot allocate assoca");
+		return NULL;
+	}
+	result->expr_type |= ASSOCA;
+	type_mem_memset(result, 0xdd, default_size); // Always shall succceed
+	struct AssocaHeader* header = type_assoca_get_header(result);
+	header->entry_max = def_count;
+	header->entry_count = 0;
+	return result;
+}
+
+/** Get pointer with largest address
+ */
+struct Varchar* _type_assoca_get_lastp(struct AssocaHeader* header) {
+	struct Varchar* largest = NULL;
+
+	for (u16 i = 0; i < header->entry_count; i++) {
+		struct Varchar* current = header->entries[i];
+		if (current > largest) {
+			largest = current;
+		}
+	}
+	return largest;
+}
+
+/** Get pointer to first free space, after last entry.
+ */
+struct Varchar* _type_assoca_get_free(struct ExpressionT* expr) {
+	if (!type_isassoca(expr))
+		return 0;
+	struct AssocaHeader* header = type_assoca_get_header(expr);
+	if (header->entry_count >= header->entry_max) {
+		return NULL;
+	}
+	struct Varchar* last_entry =  _type_assoca_get_lastp(header);
+	if (!last_entry) { // There is no entry yet
+		return (struct Varchar*)
+			(((char*)header) + _type_assoca_get_header_size(header));
+
+	}
+	u64 last_entry_size = type_varchar_get_size(last_entry);
+	char* new_entry = ((char*)last_entry) + last_entry_size;
+	return (struct Varchar*) new_entry;
+}
+
+/** Count available space behind last entry in assoca.
+ * This space must fit both value and varchar structure
+ */
+u64 _type_assoca_count_free_space(struct ExpressionT* expr) {
+	if (!type_isassoca(expr)) {
+		return 0;
+	}
+	void* last_possible_space =
+		&expr->value_memory.mem[expr->value_memory.taken];
+	void* past_last_item = _type_assoca_get_free(expr);
+	return last_possible_space - past_last_item;
+}
+
+// TODO: This must take void pointers (and verify not NULL probably)
+u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 value) {
+	if (!type_isassoca(expr)) {
+		return 1;
+	}
+	struct AssocaHeader* header = type_assoca_get_header(expr);
+
+	// Check if space is available
+	{
+		u64 space_left = _type_assoca_count_free_space(expr);
+		u64 space_required =
+			sizeof(struct Varchar) + size + sizeof(void*);
+		if (space_required > space_left) {
+			return 1;
+		}
+	}
+
+	// Modify header
+	struct Varchar* vchar = _type_assoca_get_free(expr);
+	if (_type_assoca_header_insert(header, (u64)vchar)) {
+		// Insert of index failed, but no permanent damage
+		return 1;
+	}
+
+	// Actual insertion of value
+	vchar->length = size;
+	c_memcpy(vchar->content, str, size);
+	u64 vchar_size = type_varchar_get_size(vchar); // This will get 8 aligned size
+	u64* target_location = (u64*) (((char*)vchar) + vchar_size);
+	*target_location = value;
+	return 0;
+}
+
+void* type_assoca_get(struct ExpressionT* expr, const char* str, u64 size) {
+	struct ExpressionT* result = NULL;
+	if (!type_isassoca(expr)) {
+		return result;
+	}
+	struct AssocaHeader* header = type_assoca_get_header(expr);
+	for (u32 i = 0; i < header->entry_count; i++) {
+
+	}
+
+	return result;
+
+}
+
 // ============================
 //   END TYPES
 // ============================
+
 /** Allocate empty string expression on context heap.
  *
  */
