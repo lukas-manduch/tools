@@ -20,6 +20,13 @@ static inline void run_test_c_strcmp() {
 	TEST_ASSERT(c_strcmp("Hello there", "Hello World!") > 0);
 }
 
+static inline void run_test_c_strncmp() {
+	TEST_ASSERT(c_strncmp("", "", 0) == 0);
+	TEST_ASSERT(c_strncmp("abcd", "abc", 3) == 0);
+	TEST_ASSERT(c_strncmp("abcd", "abce", 3) == 0);
+	TEST_ASSERT(c_strncmp("abcd", "abce", 4) == -1);
+}
+
 static inline void run_test_c_itoa10() {
 	u32 buf_size = 100;
 	u64 ret = 0;
@@ -77,6 +84,7 @@ void run_tests_lib() {
 
 	run_test_is_alphabet();
 	run_test_c_strcmp();
+	run_test_c_strncmp();
 	run_test_c_itoa10();
 	run_test_c_memset();
 }

@@ -373,7 +373,14 @@ i64 c_strcmp(const char* lhs, const char* rhs) {
 	return ((i64) *lhs) - ( (i64) *rhs);
 }
 
-i32 c_strncmp(const char* lhs, const char* rhs, u64 count) {
+i64 c_strncmp(const char* lhs, const char* rhs, u64 count) {
+	while (*lhs && *lhs == *rhs && count) {
+		lhs++;rhs++;count--;
+	}
+	if (!count)
+		return 0;
+	return *lhs - *rhs;
+
 
 }
 
