@@ -60,12 +60,18 @@ void run_test_types_assoca() {
 	type_assoca_insert(ass, "asd", 3, 11);
 	u64 space2 = _type_assoca_count_free_space(ass);
 	TEST_ASSERT((space2 % 8) == 0);
-	// TEST_ASSERT((space1 - space2) == 24);
-	type_assoca_insert(ass, "concat", 6, 11);
+	TEST_ASSERT((space1 - space2) == 16);
+
+	type_assoca_insert(ass, "concat", 6, 123456);
 	u64 space3 = _type_assoca_count_free_space(ass);
-	// TEST_ASSERT((space3 % 8) == 0);
+	TEST_ASSERT((space3 % 8) == 0);
+	TEST_ASSERT((space2 - space3) == 16);
 
-
+	// Test value retrieval
+	u64 val1 = (u64)type_assoca_get(ass, "asd", 3);
+	u64 val2 = (u64)type_assoca_get(ass, "concat", 6);
+	TEST_ASSERT(val1 == 11);
+	TEST_ASSERT(val2 == 123456);
 }
 
 void run_tests_types() {

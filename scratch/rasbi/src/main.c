@@ -578,7 +578,7 @@ i64 type_mem_memset(struct ExpressionT* expr, unsigned char value, u64 length) {
 
 struct Varchar {
 	u16 length;
-	unsigned char content[];
+	char content[];
 };
 
 /** Get size of varchar entry rounded up to 8 bytes
@@ -708,10 +708,10 @@ struct Varchar* _type_assoca_get_free(struct ExpressionT* expr) {
 	if (!last_entry) { // There is no entry yet
 		return (struct Varchar*)
 			(((char*)header) + _type_assoca_get_header_size(header));
-
 	}
 	u64 last_entry_size = type_varchar_get_size(last_entry);
-	char* new_entry = ((char*)last_entry) + last_entry_size;
+	char* new_entry =
+		((char*)last_entry) + last_entry_size + sizeof(void*);
 	return (struct Varchar*) new_entry;
 }
 
@@ -728,6 +728,7 @@ u64 _type_assoca_count_free_space(struct ExpressionT* expr) {
 	return last_possible_space - past_last_item;
 }
 
+// TODO: Check if entry already exists
 // TODO: This must take void pointers (and verify not NULL probably)
 u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 value) {
 	if (!type_isassoca(expr)) {
@@ -762,17 +763,26 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
 }
 
 void* type_assoca_get(struct ExpressionT* expr, const char* str, u64 size) {
-	struct ExpressionT* result = NULL;
+	void* result = NULL;
 	if (!type_isassoca(expr)) {
 		return result;
 	}
 	struct AssocaHeader* header = type_assoca_get_header(expr);
 	for (u32 i = 0; i < header->entry_count; i++) {
-
+		struct Varchar* key = header->entries[i];
+		if (key->length != size)
+			continue;
+		if (c_strncmp(key->content, str,size) != 0)
+			continue;
+		// match found
+		u64 varchar_size = type_varchar_get_size(key);
+		u64 *valuep = (u64*)
+			(((char*)key) + varchar_size);
+		result = (void*)*valuep;
+		break;
 	}
 
-	return result;
-
+	return (void*)result;
 }
 
 // ============================
