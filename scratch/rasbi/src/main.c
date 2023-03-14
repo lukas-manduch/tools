@@ -728,12 +728,52 @@ u64 _type_assoca_count_free_space(struct ExpressionT* expr) {
 	return last_possible_space - past_last_item;
 }
 
-// TODO: Check if entry already exists
-// TODO: This must take void pointers (and verify not NULL probably)
+/** Find STR key in assoca, and return pointer to it's internal structure
+ * On error returns NULL
+ */
+struct Varchar* _type_assoca_find_entry(
+		struct ExpressionT* expr, const char* str, u64 size) {
+	struct Varchar* result = NULL;
+	if (!type_isassoca(expr)) {
+		return result;
+	}
+	struct AssocaHeader* header = type_assoca_get_header(expr);
+	for (u32 i = 0; i < header->entry_count; i++) {
+		struct Varchar* key = header->entries[i];
+		if (key->length != size)
+			continue;
+		if (c_strncmp(key->content, str,size) != 0)
+			continue;
+		// match found
+		result = key;
+		break;
+	}
+	return (void*)result;
+}
+
+/** Insert VALUE to associative array EXPR under key STR (with lenght SIZE).
+ * On success retunrs 0, on error 1.
+ * Currently no realocations are supported
+ * TODO: This must take void pointers (and verify not NULL probably)
+ * TODO: Sorting
+ * TODO: Documentation
+ */
 u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 value) {
 	if (!type_isassoca(expr)) {
 		return 1;
 	}
+
+	// Check if entry exists
+	struct Varchar* old_entry = _type_assoca_find_entry(expr, str, size);
+	if (old_entry) { // It exists, so just replace it
+		u16 vchar_size = type_varchar_get_size(old_entry);
+		u64* destp = (u64*)
+			(((char*)old_entry) + vchar_size);
+		*destp = value;
+		return 0;
+	}
+
+	// No entry was found, let's insert
 	struct AssocaHeader* header = type_assoca_get_header(expr);
 
 	// Check if space is available
@@ -762,27 +802,20 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
 	return 0;
 }
 
+
+/** Get pointer stored under STR key in associative array EXPR
+ * If STR key doesn't exist, NULL is returned
+ */
 void* type_assoca_get(struct ExpressionT* expr, const char* str, u64 size) {
-	void* result = NULL;
-	if (!type_isassoca(expr)) {
-		return result;
-	}
-	struct AssocaHeader* header = type_assoca_get_header(expr);
-	for (u32 i = 0; i < header->entry_count; i++) {
-		struct Varchar* key = header->entries[i];
-		if (key->length != size)
-			continue;
-		if (c_strncmp(key->content, str,size) != 0)
-			continue;
-		// match found
-		u64 varchar_size = type_varchar_get_size(key);
-		u64 *valuep = (u64*)
-			(((char*)key) + varchar_size);
-		result = (void*)*valuep;
-		break;
+	struct Varchar* varchar = _type_assoca_find_entry(expr, str, size);
+	if (!varchar) {
+		return NULL;
 	}
 
-	return (void*)result;
+	u64 varchar_size = type_varchar_get_size(varchar);
+	u64 *valuep = (u64*)  // This could be void** but this is more logical
+		(((char*)varchar) + varchar_size);
+	return (void*)*valuep;
 }
 
 // ============================

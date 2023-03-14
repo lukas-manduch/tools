@@ -72,6 +72,14 @@ void run_test_types_assoca() {
 	u64 val2 = (u64)type_assoca_get(ass, "concat", 6);
 	TEST_ASSERT(val1 == 11);
 	TEST_ASSERT(val2 == 123456);
+
+	// Test reinsertion
+	TEST_ASSERT(type_assoca_insert(ass, "asd", 3, 9876) == 0);
+	val1 = (u64)type_assoca_get(ass, "asd", 3);
+	TEST_ASSERT(val1 == 9876);
+	TEST_ASSERT(type_assoca_insert(ass, "concat", 6, 9875) == 0);
+	val2 = (u64)type_assoca_get(ass, "concat", 6);
+	TEST_ASSERT(val2 == 9875);
 }
 
 void run_tests_types() {
