@@ -15,6 +15,9 @@
 #define i32 int
 #define i64 signed long long
 
+#if DEBUG == 1
+#define TEST
+#endif
 _Static_assert(sizeof(u64) == 8, "Bad size");
 _Static_assert(sizeof(i64) == 8, "Bad size");
 _Static_assert(sizeof(u32) == 4, "Bad size");
@@ -143,9 +146,10 @@ struct context {
 
 	char stack[STACK_SIZE];
 	unsigned short _stack_pointer;
-	struct ExpressionT* program; // This shall be CONS reference
-	struct ExpressionT* parent_table;
-	struct ExpressionT* return_values;
+	struct ExpressionT* program; // (CONS) parsed program
+	struct ExpressionT* parent_table; // (mem) Function call graph
+	struct ExpressionT* return_values; // (mem) Return values from funtion graph
+	struct ExpressionT* builtins; // (assoca) Builtin functions
 };
 
 static inline u64 round8(u64 num) {
@@ -302,6 +306,7 @@ void init_context(struct context* ctx) {
 	ctx->program = NULL;
 	ctx->parent_table = NULL;
 	ctx->return_values = NULL;
+	ctx->builtins = NULL;
 }
 
 LOCAL void* stack_push_var(struct context* ctx, u64 size) {
@@ -751,7 +756,7 @@ struct Varchar* _type_assoca_find_entry(
 	return (void*)result;
 }
 
-/** Insert VALUE to associative array EXPR under key STR (with lenght SIZE).
+/** Insert VALUE to associative array EXPR under key STR (with length SIZE).
  * On success retunrs 0, on error 1.
  * Currently no realocations are supported
  * TODO: This must take void pointers (and verify not NULL probably)
@@ -801,7 +806,6 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
 	*target_location = value;
 	return 0;
 }
-
 
 /** Get pointer stored under STR key in associative array EXPR
  * If STR key doesn't exist, NULL is returned
@@ -1243,7 +1247,8 @@ struct ExpressionT* interpreter_get_nested_func(
 	return NULL;
 }
 
-void runtime_concat(struct context* ctx); // TMP
+void runtime_concat(struct context* ctx);
+void builtin_stdout(struct context* ctx);
 
 u64 _interpreter_count_expr_nodes_internal(struct ExpressionT* expr) {
 	if (expr->expr_type != CONS) {
@@ -1324,8 +1329,9 @@ struct ExpressionT* interpreter_call_function(
 		return ret;
 	}
 	if (func->expr_type == SYMBOL) {
-		DEBUG_ERROR("Executing function");
+		sys_write(1, "===", 3);
 		sys_write(1, func->value_symbol.content, func->value_symbol.size);
+		sys_write(1, "===\n", 4);
 	}
 
 	u64 stack_pointer = stack_get_sp(ctx);
@@ -1335,8 +1341,19 @@ struct ExpressionT* interpreter_call_function(
 		goto end;
 	}
 
+	void (*builtin_function)(struct context*) = runtime_concat;
+
+	builtin_function = type_assoca_get(ctx->builtins,
+			func->value_symbol.content, func->value_symbol.size);
+
+	if (!builtin_function) {
+		// TODO: Panic
+		DEBUG_ERROR("Error unknown function");
+		goto end;
+	}
+
 	// Let's assume its concat
-	runtime_concat(ctx);
+	builtin_function(ctx);
 
 	// Now get return value
 	ret = *((struct ExpressionT**)ret_val_pointer);
@@ -1400,9 +1417,42 @@ struct ExpressionT* interpreter_build_parent_graph(struct context* ctx) {
 	return graph;
 }
 
+u64 interpreter_load_builtins(struct context* ctx) {
+	struct ExpressionT* assoca = type_assoca_alloc(ctx);
+	if (!assoca) {
+		return 1;
+	}
+
+	{
+		char concat[] = {'c', 'o', 'n', 'c', 'a', 't'};
+		u64 ret = type_assoca_insert(
+				assoca, concat, 6, (u64)runtime_concat);
+		if (ret != 0) {
+			return 1;
+		}
+	}
+
+	{
+		char write[] = {'w', 'r', 'i', 't', 'e'};
+		u64 ret = type_assoca_insert(
+				assoca, write, 5, (u64)builtin_stdout);
+		if (ret != 0) {
+			return 1;
+		}
+	}
+
+	ctx->builtins = assoca;
+	return 0;
+}
+
 int execute(struct context* ctx) {
 	if(!ctx->program) {
 		return -1;
+	}
+
+	if (interpreter_load_builtins(ctx)) {
+		DEBUG_ERROR("Error loading builtins");
+		return-1;
 	}
 
 	struct ExpressionT* parents = interpreter_build_parent_graph(ctx);
@@ -1427,7 +1477,6 @@ int execute(struct context* ctx) {
 		struct ExpressionT* current_f =
 			interpreter_get_function_by_index(ctx, current_function);
 		struct ExpressionT* fret = NULL;
-		// Check how to call this function
 		fret = interpreter_call_function(ctx, current_f);
 		if (fret == NULL) {
 			DEBUG_ERROR("Error calling function");
@@ -1450,23 +1499,6 @@ int execute(struct context* ctx) {
 // ============================
 //   RUNTIME FUNCTIONS
 // ============================
-
-
-// struct Expression* _copy_string_heap(
-// 		struct context* ctx, const char* str, u64 str_size) {
-//
-// }
-//
-// LOCAL struct Expression* runtime_get_error(struct context* ctx, u64 number) {
-// 	switch (number) {
-// 		case RUNTIME_ARGUMENT_COUNT:
-// 			{
-// 				break;
-// 			}
-// 		default:
-// 			return NULL;
-// 	}
-// }
 
 void runtime_concat(struct context* ctx) {
 	u64 argcount = interpreter_get_arg_count(ctx);
@@ -1493,8 +1525,12 @@ void runtime_concat(struct context* ctx) {
 		arg2->value_string.size, arg2->value_string.content);
 
 	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
-	sys_write(1, result->value_string.content, result->value_string.size);
 	*ret_place = result;
+}
+
+void runtime_panic() {
+	DEBUG_ERROR("panic");
+	sys_exit(1);
 }
 
 /** Get the length of linked list.
@@ -1522,17 +1558,33 @@ i64 runtime_list_length(struct ExpressionT* first) {
 //   END RUNTIME FUNCTIONS
 // ============================
 
+void builtin_stdout(struct context* ctx) {
+	u64 argcount = interpreter_get_arg_count(ctx);
+	if (argcount != 1) {
+		DEBUG_ERROR("Wrong arg count");
+		return;
+	}
+	struct ExpressionT *arg1;
+	arg1 = interpreter_get_arg(ctx, 1);
+	if (arg1->expr_type != STRING) {
+		DEBUG_ERROR("Fail here, bad argument types");
+		return;
+	}
+	sys_write(1, arg1->value_string.content, arg1->value_string.size);
+	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
+	*ret_place = (void*)1;
+}
 
-#if DEBUG == 1
+#ifdef TEST
 #include "src/tests.c"
 #endif
 
 void _start() {
-#if DEBUG == 1
+#ifdef TEST
 	run_tests();
 #endif
 	//const char* command = "(concat \"some long string here\"  \"\" \" And this one \" yolo)";
-	const char* command = "( concat (concat \"some \" \" string \") (concat \"other\" \" string\" ) )";
+	const char* command = "(write ( concat  \"some \" \" string \")  )";
 	struct context ctx;
 	init_context(&ctx);
 	if (parse_program(&ctx, command, c_strlen(command)) < 0) {
