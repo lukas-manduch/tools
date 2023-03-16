@@ -1,10 +1,18 @@
 #include "../include/defines.h"
 
-// Platform depended code
+// ============================
+//   PLATFORM
+// ============================
+
+// Platform depended code, currently this only works on x86_64 anyway, but in
+// future, there could also be arm
+
 void sys_exit(i32 error_code);
 i64 sys_read(u32 fd, const char *buf, u64 count);
 i64 sys_write(u32 fd, const char *buf, u64 count);
-i64 sys_stat();
+i64 sys_stat(const char* filename, void* statbuf);
+u64 sys_stat_stat_struct_len();
+u64 sys_stat_stat_get_size(void* statbuf);
 
 // These two are really important to be inlined even in debug builds :)
 __attribute__((always_inline)) static inline void sys_stack_push_u64(u64 value)  {
@@ -20,6 +28,10 @@ __attribute__((always_inline)) static inline u64 sys_stack_pop_u64() {
 			);
 	return result;
 }
+
+// ============================
+//   END PLATFORM
+// ============================
 
 
 struct AllocEntry {
@@ -1449,6 +1461,19 @@ int execute(struct context* ctx) {
 // ============================
 //   RUNTIME FUNCTIONS
 // ============================
+
+/** Return file size in bytes of file FILENAME
+ * On error returns -1
+ */
+
+i64 runtime_get_file_size(const char* filename) {
+	char buffer[sys_stat_stat_struct_len()];
+	if (sys_stat(filename, buffer)) {
+		DEBUG_ERROR("Sys stat failed");
+		return -1;
+	}
+	return sys_stat_stat_get_size(buffer);
+}
 
 void runtime_concat(struct context* ctx) {
 	u64 argcount = interpreter_get_arg_count(ctx);

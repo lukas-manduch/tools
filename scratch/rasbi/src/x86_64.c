@@ -45,10 +45,25 @@ i64 sys_read(u32 fd, const char *buf, u64 count) {
 	return ret;
 }
 
-i64 sys_stat() {
-	return -1;
+i64 sys_stat(const char* filename, void* statbuf) {
+	i64 ret = 0;
+ 	__asm__ volatile (
+ 	        "movq $4, %%rax\n\t"
+ 	        "movq %1, %%rdi\n\t"
+ 	        "movq %2, %%rsi\n\t"
+		"syscall\n\t"
+		"movq %%rax, %0 \n\t"
+ 		 : "=rm" (ret)
+ 		 : "rm"  (filename), "rm" (statbuf)
+ 		 : "rax" , "rdi", "rsi" /* These two idk */, "r11", "rcx"
+ 	       );
+	return ret;
 }
 
 u64 sys_stat_stat_struct_len() {
 	return sizeof(struct stat);
+}
+
+u64 sys_stat_stat_get_size(void* statbuf) {
+	return ((struct stat*)statbuf)->st_size;
 }
