@@ -1,10 +1,14 @@
-CFLAGS := -Wall -Wextra -g
+CFLAGS := -Wall -Wextra -g -std=c17 -nostdlib 
 INCLUDES := -I.
-SOURCE := $(wildcard src/*.c )
+MAIN_SOURCE := $(wildcard src/*tests.c ) src/main.c
 
-out/main.o: $(SOURCE)
-	$(CC) $(CFLAGS) $(INCLUDES) -c src/main.c -o $@ -std=c17 -nostdlib 
-out/program.exe: out/main.o
+out/main.o: $(MAIN_SOURCE)
+	$(CC) $(CFLAGS) $(INCLUDES) -c src/main.c -o $@ 
+
+out/x86_64.o: src/x86_64.c
+	$(CC) $(CFLAGS) $(INCLUDES) -c $^ -o $@ 
+
+out/program.exe: out/main.o out/x86_64.o
 	$(CC) $(CFLAGS) $(INCLUDES) $^ -o $@ -std=c17 -nostdlib
 
 all: out/program.exe

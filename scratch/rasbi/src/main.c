@@ -1,44 +1,10 @@
-#include <sys/types.h>
+#include "../include/defines.h"
 
-#define DEBUG 1
-#define LOCAL static
-#define INLINE static inline
-#define NULL 0
-#define FALSE 0
-#define TRUE 1
-#define STACK_SIZE 4096
-#define HEAP_SIZE 4096
-#define U32_MAX 0xffffffff
-#define u64 unsigned long long
-#define u32 unsigned int
-#define u16 unsigned short
-#define i32 int
-#define i64 signed long long
-
-#if DEBUG == 1
-#define TEST
-#endif
-_Static_assert(sizeof(u64) == 8, "Bad size");
-_Static_assert(sizeof(i64) == 8, "Bad size");
-_Static_assert(sizeof(u32) == 4, "Bad size");
-_Static_assert(sizeof(i32) == 4, "Bad size");
-_Static_assert(sizeof(u16) == 2, "Bad size");
-
-i64 sys_read(u32 fd, const char *buf, u64 count) {
-	i64 ret = 0;
- 	__asm__ volatile (
- 	        "movq $0, %%rax\n\t"
- 	        "movl %1, %%edi\n\t"
- 	        "movq %2, %%rsi\n\t"
- 	        "movq %3, %%rdx\n\t"
-		"syscall\n\t"
-		"movq %%rax, %0 \n\t"
- 		 : "=rm" (ret)
- 		 : "rm"  (fd), "rm" (buf), "rm" (count)
- 		 : "rax" , "rdi", "rsi", "rdx" /* These two idk */, "r11", "rcx"
- 	       );
-	return ret;
-}
+// Platform depended code
+void sys_exit(i32 error_code);
+i64 sys_read(u32 fd, const char *buf, u64 count);
+i64 sys_write(u32 fd, const char *buf, u64 count);
+i64 sys_stat();
 
 // These two are really important to be inlined even in debug builds :)
 __attribute__((always_inline)) static inline void sys_stack_push_u64(u64 value)  {
@@ -55,34 +21,6 @@ __attribute__((always_inline)) static inline u64 sys_stack_pop_u64() {
 	return result;
 }
 
-void sys_exit(i32 error_code) {
-	__asm__ (
-		"movq $60, %%rax\n\t"
-		"movl %0, %%edi\n\t"
-		"syscall"
-		: // empty
-		: "rm" (error_code)
-		);
-}
-
-i64 sys_write(u32 fd, const char *buf, u64 count) {
-	i64 ret = 0;
- 	__asm__ volatile (
- 	        "movq $1, %%rax\n\t"
- 	        "movl %1, %%edi\n\t"
- 	        "movq %2, %%rsi\n\t"
- 	        "movq %3, %%rdx\n\t"
-		"syscall\n\t"
-		"movq %%rax, %0 \n\t"
- 		 : "=rm" (ret)
- 		 : "rm"  (fd), "rm" (buf), "rm" (count)
- 		 : "rax" , "rdi", "rsi", "rdx" /* These two idk */, "r11", "rcx"
- 	       );
-	return ret;
-}
-#if __STDC_VERSION__ != 201710L
-#error "Bad c version, use std=c17"
-#endif
 
 struct AllocEntry {
 	u32 size;
@@ -260,6 +198,10 @@ void* heap_alloc(struct context* context, u64 size) {
 	entry->pad2 = 0xde;
 	return (char*)ret + sizeof(struct AllocEntry);
 }
+
+// void heap_free(struct context* ctx, void* memory) {
+// 
+// }
 
 LOCAL int init_heap(void* data, u64 size) {
 	if (size <= sizeof(struct AllocEntry)) {
@@ -609,6 +551,14 @@ void type_varchar_create(void* dest, const char* source, u64 source_length) {
 // ------ ASSOCA ------
 
 // Associative array
+//
+// This is one of larger types that are present in rasbi.  Current
+// implementation is not built very efficient, but it has some good basics on
+// which we can build.
+//
+// All entries are always in pairs of string -> 64 bit value (usually pointer)
+//
+//
 //
 
 struct AssocaHeader {
