@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include "../include/defines.h"
 
@@ -45,6 +46,8 @@ i64 sys_read(u32 fd, const char *buf, u64 count) {
 	return ret;
 }
 
+/** 0 on sucess negative on failure
+ */
 i64 sys_stat(const char* filename, void* statbuf) {
 	i64 ret = 0;
  	__asm__ volatile (
@@ -66,4 +69,40 @@ u64 sys_stat_stat_struct_len() {
 
 u64 sys_stat_stat_get_size(void* statbuf) {
 	return ((struct stat*)statbuf)->st_size;
+}
+
+/** Returns fd on success and -ERROR on failure
+ */
+i64 sys_open(const char *filename, i32 flags, i32 mode) {
+	i64 ret = 0;
+ 	__asm__ volatile (
+ 	        "movq $2, %%rax\n\t"
+ 	        "movq %1, %%rdi\n\t"
+ 	        "movl %2, %%esi\n\t"
+ 	        "movl %3, %%edx\n\t"
+		"syscall\n\t"
+		"movq %%rax, %0 \n\t"
+ 		 : "=rm" (ret)
+ 		 : "rm"  (filename), "rm" (flags), "rm" (mode)
+ 		 : "rax" , "rdi", "rsi", "rdx" /* These two idk */, "r11", "rcx"
+ 	       );
+	return ret;
+}
+
+i32 sys_open_flag_read() {
+	return O_RDONLY;
+}
+
+i64 sys_close(u32 fd) {
+	i64 ret = 0;
+ 	__asm__ volatile (
+ 	        "movq $3, %%rax\n\t"
+ 	        "movl %1, %%edi\n\t"
+		"syscall\n\t"
+		"movq %%rax, %0 \n\t"
+ 		 : "=rm" (ret)
+ 		 : "rm"  (fd)
+ 		 : "rax" , "rdi" /* These two idk */, "r11", "rcx"
+ 	       );
+	return ret;
 }

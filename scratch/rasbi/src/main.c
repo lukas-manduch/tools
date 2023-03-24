@@ -13,6 +13,9 @@ i64 sys_write(u32 fd, const char *buf, u64 count);
 i64 sys_stat(const char* filename, void* statbuf);
 u64 sys_stat_stat_struct_len();
 u64 sys_stat_stat_get_size(void* statbuf);
+i64 sys_open(const char *filename, i32 flags, i32 mode);
+i32 sys_open_flag_read();
+i32 sys_close(u32 fd);
 
 // These two are really important to be inlined even in debug builds :)
 __attribute__((always_inline)) static inline void sys_stack_push_u64(u64 value)  {
@@ -44,16 +47,17 @@ struct AllocEntry {
 _Static_assert(sizeof(struct AllocEntry) == 8, "Bad size AllocEntry");
 
 enum ExpressionType {
-	SYMBOL   = 1 << 1,
-	STRING   = 1 << 2,
-	CONS     = 1 << 3,
-	MEMORY   = 1 << 4,
-	ASSOCA   = 1 << 5,
+	SYMBOL        = 1 << 1,
+	STRING        = 1 << 2,
+	CONS          = 1 << 3,
+	MEMORY        = 1 << 4,
+	ASSOCA        = 1 << 5,
+	TYPE_STRING   = 1 << 6,
 };
 
-enum RuntimeErrors {
-	RUNTIME_ARGUMENT_COUNT,
-};
+// enum RuntimeErrors {
+// 	RUNTIME_ARGUMENT_COUNT,
+// };
 
 struct StringExpression {
 	u32 size;
@@ -533,7 +537,59 @@ i64 type_mem_memset(struct ExpressionT* expr, unsigned char value, u64 length) {
 	return 0;
 }
 
+// ------ STRING ------
+
+/** Check if type of expr is string.
+ * Returns TRUE or FALSE
+ */
+u32 type_isstring(struct ExpressionT* expr) {
+	if (type_ismem(expr) && expr->expr_type & TYPE_STRING)
+		return TRUE;
+	return FALSE;
+}
+
+/** Allocate string with max SIZE. String is initally empty.
+ * Returns pointer to new string or NULL on failure
+ */
+struct ExpressionT* type_string_alloc(struct context* ctx, u32 size) {
+	struct ExpressionT* result = type_mem_alloc(ctx, size);
+	if (result) {
+		result->expr_type |= TYPE_STRING;
+	}
+	return result;
+}
+
+/** Set length of string to len and wipes all contents.
+ * Returns 0 on success, 1 on failure - length is larger than allocated size
+ */
+u32 type_string_set_length(struct ExpressionT* expr, u32 len) {
+	i64 memset_result = type_mem_memset(expr, 0, len);
+	if (memset_result != 0) 
+		return 1;
+	return 0;
+}
+
+/** Returns length of string.
+ */
+u32 type_string_get_length(struct ExpressionT* expr) {
+	i64 mem_len = type_mem_get_len(expr);
+	return mem_len < 0 ? 0 : mem_len;
+}
+
+/** Get pointer to first character of string.
+ * Returns NULL on error
+ */
+char* type_string_getp(struct ExpressionT* expr) {
+	if (!type_isstring(expr)) {
+		return NULL;
+	}
+	return type_mem_get_loc(expr, 0);
+}
+
 // ------ VARCHAR ------
+
+// Varchar is minor type, that cannot be used as object for interpreter.
+// Instead it is only used internally, becuase it is space efficient
 
 struct Varchar {
 	u16 length;
