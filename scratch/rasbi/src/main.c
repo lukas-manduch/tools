@@ -1266,6 +1266,7 @@ struct ExpressionT* interpreter_get_nested_func(
 
 void builtin_concat(struct context* ctx);
 void builtin_stdout(struct context* ctx);
+void builtin_read_file(struct context* ctx);
 
 u64 _interpreter_count_expr_nodes_internal(struct ExpressionT* expr) {
 	if (expr->expr_type != CONS) {
@@ -1458,6 +1459,15 @@ u64 interpreter_load_builtins(struct context* ctx) {
 		}
 	}
 
+	{
+		char rf[] = {'r', 'e', 'a', 'd', 'f', 'i', 'l', 'e'};
+		u64 ret = type_assoca_insert(
+				assoca, rf, 8, (u64)builtin_read_file);
+		if (ret != 0) {
+			return 1;
+		}
+	}
+
 	ctx->builtins = assoca;
 	return 0;
 }
@@ -1586,6 +1596,29 @@ i64 runtime_list_length(struct ExpressionT* first) {
 	return list_length;
 }
 
+/** Read file content to BUFFER up to BUF_SIZE length.
+ *  Returns number of bytes read, or -1 on error
+ */
+i64 runtime_read_file(const char* filename, char* buffer, u32 buf_size) {
+	i64 fsize = runtime_get_file_size(filename);
+	if (fsize < 0) {
+		return -1;
+	}
+	fsize = fsize > buf_size ? buf_size : fsize;
+	i64 fd = sys_open(filename, sys_open_flag_read(), 0);
+	if (fd < 1) {
+		return -1;
+	}
+	i64 len_read = sys_read(fd, buffer, fsize);
+	if (len_read < 0) { // Set error to -1
+		len_read = -1;
+	}
+	if (sys_close(fd) < 0) {
+		DEBUG_ERROR("Sys close failed");
+	}
+	return len_read;
+}
+
 // ============================
 //   END RUNTIME FUNCTIONS
 // ============================
@@ -1607,6 +1640,43 @@ void builtin_stdout(struct context* ctx) {
 	*ret_place = (void*)1;
 }
 
+void builtin_read_file(struct context* ctx) {
+	u64 argcount = interpreter_get_arg_count(ctx);
+	if (argcount != 1) {
+		DEBUG_ERROR("Wrong arg count");
+		return;
+	}
+	struct ExpressionT *arg1;
+	arg1 = interpreter_get_arg(ctx, 1);
+	if (!type_isstring(arg1)) {
+		DEBUG_ERROR("Fail here, bad argument types");
+		return;
+	}
+
+	const char* filename = "/etc/pam.conf";
+	i64 fsize = runtime_get_file_size(filename);
+	if (fsize < 0) {
+		// TODO: Better error handling
+		DEBUG_ERROR("Cannot determine file size");
+		return;
+	}
+	struct ExpressionT* result_string = type_string_alloc(ctx, fsize);
+	if (!result_string) {
+		DEBUG_ERROR("Cannot allocate space for file");
+		return;
+	}
+	type_string_set_length(result_string, fsize);
+	i64 runtime_ret =
+		runtime_read_file(filename, type_string_getp(result_string), fsize);
+	if (runtime_ret < 0) {
+		DEBUG_ERROR("Runtime cannot read file");
+		return;
+	}
+
+	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
+	*ret_place = (void*)result_string;
+}
+
 #ifdef TEST
 #include "src/tests.c"
 #endif
@@ -1615,8 +1685,9 @@ void _start() {
 #ifdef TEST
 	run_tests();
 #endif
-	//const char* command = "(concat \"some long string here\"  \"\" \" And this one \" yolo)";
-	const char* command = "(write ( concat  \"some \" \" string \")  )";
+	//const char* command = "(concat \"some long string here\"   \" And this one \" )";
+	//const char* command = "(write ( concat  \"some \" \" string \")  )";
+	const char* command = "(write (readfile \"/etc/pam.con\"))";
 	struct context ctx;
 	init_context(&ctx);
 	if (parse_program(&ctx, command, c_strlen(command)) < 0) {

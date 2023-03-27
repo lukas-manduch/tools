@@ -14,6 +14,8 @@ void sys_exit(i32 error_code) {
 		);
 }
 
+#define X86SYSCALL3(number, arg1, arg2, arg3) void
+
 i64 sys_write(u32 fd, const char *buf, u64 count) {
 	i64 ret = 0;
  	__asm__ volatile (
