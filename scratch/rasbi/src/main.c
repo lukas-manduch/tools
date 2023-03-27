@@ -1540,36 +1540,6 @@ i64 runtime_get_file_size(const char* filename) {
 	return sys_stat_stat_get_size(buffer);
 }
 
-void builtin_concat(struct context* ctx) {
-	u64 argcount = interpreter_get_arg_count(ctx);
-	if (argcount != 2) {
-		DEBUG_ERROR("Wrong arg count, fixme message");
-		return;
-	}
-	struct ExpressionT *arg1, *arg2;
-	arg1 = interpreter_get_arg(ctx, 1);
-	arg2 = interpreter_get_arg(ctx, 2);
-	if (!type_isstring(arg1) || !type_isstring(arg2)) {
-		DEBUG_ERROR("Fail concat, bad argument types");
-		return;
-	}
-	u64 final_size =
-		type_string_get_length(arg1) + type_string_get_length(arg2);
-	struct ExpressionT* result = type_string_alloc(ctx, final_size);
-	if (!result) {
-		DEBUG_ERROR("Fail here, cannot allocate fixme");
-		return;
-	}
-	char *destp = type_string_getp(result);
-	c_strcpy_s(destp, type_string_get_length(arg1), type_string_getp(arg1));
-
-	c_strcpy_s(destp + type_string_get_length(arg1),
-		type_string_get_length(arg2), type_string_getp(arg2));
-
-	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
-	*ret_place = result;
-}
-
 void runtime_panic() {
 	DEBUG_ERROR("panic");
 	sys_exit(1);
@@ -1622,6 +1592,36 @@ i64 runtime_read_file(const char* filename, char* buffer, u32 buf_size) {
 // ============================
 //   END RUNTIME FUNCTIONS
 // ============================
+
+void builtin_concat(struct context* ctx) {
+	u64 argcount = interpreter_get_arg_count(ctx);
+	if (argcount != 2) {
+		DEBUG_ERROR("Wrong arg count, fixme message");
+		return;
+	}
+	struct ExpressionT *arg1, *arg2;
+	arg1 = interpreter_get_arg(ctx, 1);
+	arg2 = interpreter_get_arg(ctx, 2);
+	if (!type_isstring(arg1) || !type_isstring(arg2)) {
+		DEBUG_ERROR("Fail concat, bad argument types");
+		return;
+	}
+	u64 final_size =
+		type_string_get_length(arg1) + type_string_get_length(arg2);
+	struct ExpressionT* result = type_string_alloc(ctx, final_size);
+	if (!result) {
+		DEBUG_ERROR("Fail here, cannot allocate fixme");
+		return;
+	}
+	char *destp = type_string_getp(result);
+	c_strcpy_s(destp, type_string_get_length(arg1), type_string_getp(arg1));
+
+	c_strcpy_s(destp + type_string_get_length(arg1),
+		type_string_get_length(arg2), type_string_getp(arg2));
+
+	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
+	*ret_place = result;
+}
 
 void builtin_stdout(struct context* ctx) {
 	u64 argcount = interpreter_get_arg_count(ctx);
