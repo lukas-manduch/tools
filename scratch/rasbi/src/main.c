@@ -216,7 +216,7 @@ void* heap_alloc(struct context* context, u64 size) {
 }
 
 // void heap_free(struct context* ctx, void* memory) {
-// 
+//
 // }
 
 LOCAL int init_heap(void* data, u64 size) {
@@ -548,7 +548,17 @@ u32 type_isstring(struct ExpressionT* expr) {
 	return FALSE;
 }
 
-/** Allocate string with max SIZE. String is initally empty.
+/** Set length of string to len and wipes all contents.
+ * Returns 0 on success, 1 on failure - length is larger than allocated size
+ */
+u32 type_string_set_length(struct ExpressionT* expr, u32 len) {
+	i64 memset_result = type_mem_memset(expr, 0, len);
+	if (memset_result != 0)
+		return 1;
+	return 0;
+}
+
+/** Allocate string with max SIZE. String is initally zeroed.
  * Returns pointer to new string or NULL on failure
  */
 struct ExpressionT* type_string_alloc(struct context* ctx, u32 size) {
@@ -556,18 +566,10 @@ struct ExpressionT* type_string_alloc(struct context* ctx, u32 size) {
 	if (result) {
 		result->expr_type |= TYPE_STRING;
 	}
+	type_string_set_length(result, size);
 	return result;
 }
 
-/** Set length of string to len and wipes all contents.
- * Returns 0 on success, 1 on failure - length is larger than allocated size
- */
-u32 type_string_set_length(struct ExpressionT* expr, u32 len) {
-	i64 memset_result = type_mem_memset(expr, 0, len);
-	if (memset_result != 0) 
-		return 1;
-	return 0;
-}
 
 /** Returns length of string.
  */
@@ -844,7 +846,7 @@ void* type_assoca_get(struct ExpressionT* expr, const char* str, u64 size) {
 //   END TYPES
 // ============================
 
-/** Allocate empty string expression on context heap.
+/** DEPRECATED Allocate empty string expression on context heap.
  *
  */
 struct ExpressionT* alloc_string(struct context* ctx, u64 length) {
@@ -947,15 +949,13 @@ Expression* parser_parse_string(
 		return NULL;
 	}
 
-	ret = heap_alloc(ctx, sizeof(Expression) + final_size);
+	ret = type_string_alloc(ctx, final_size);
 	if (!ret) {
-		DEBUG_ERROR("Allocation failed");
-		return ret;
+		DEBUG_ERROR("Parser str alloc failed");
+		return NULL;
 	}
 
-	ret->expr_type = STRING;
-
-
+	char* destp = type_string_getp(ret);
 	// Copy string
 	u64 processed = 1;
 	for (u64 i = 1, dest = 0; i < max_size; i++) {
@@ -964,9 +964,8 @@ Expression* parser_parse_string(
 			// Now breaking here is guaranteed
 			break;
 		}
-		ret->value_string.content[dest++] = buf[i];
+		destp[dest++] = buf[i];
 	}
-	ret->value_string.size = final_size;
 	if (num_processed)
 		*num_processed = processed;
 	return ret;
@@ -1265,7 +1264,7 @@ struct ExpressionT* interpreter_get_nested_func(
 	return NULL;
 }
 
-void runtime_concat(struct context* ctx);
+void builtin_concat(struct context* ctx);
 void builtin_stdout(struct context* ctx);
 
 u64 _interpreter_count_expr_nodes_internal(struct ExpressionT* expr) {
@@ -1359,7 +1358,7 @@ struct ExpressionT* interpreter_call_function(
 		goto end;
 	}
 
-	void (*builtin_function)(struct context*) = runtime_concat;
+	void (*builtin_function)(struct context*) = NULL;
 
 	builtin_function = type_assoca_get(ctx->builtins,
 			func->value_symbol.content, func->value_symbol.size);
@@ -1444,7 +1443,7 @@ u64 interpreter_load_builtins(struct context* ctx) {
 	{
 		char concat[] = {'c', 'o', 'n', 'c', 'a', 't'};
 		u64 ret = type_assoca_insert(
-				assoca, concat, 6, (u64)runtime_concat);
+				assoca, concat, 6, (u64)builtin_concat);
 		if (ret != 0) {
 			return 1;
 		}
@@ -1531,7 +1530,7 @@ i64 runtime_get_file_size(const char* filename) {
 	return sys_stat_stat_get_size(buffer);
 }
 
-void runtime_concat(struct context* ctx) {
+void builtin_concat(struct context* ctx) {
 	u64 argcount = interpreter_get_arg_count(ctx);
 	if (argcount != 2) {
 		DEBUG_ERROR("Wrong arg count, fixme message");
@@ -1540,20 +1539,22 @@ void runtime_concat(struct context* ctx) {
 	struct ExpressionT *arg1, *arg2;
 	arg1 = interpreter_get_arg(ctx, 1);
 	arg2 = interpreter_get_arg(ctx, 2);
-	if (arg1->expr_type != STRING || arg2->expr_type != STRING) {
-		DEBUG_ERROR("Fail here, bad argument types");
+	if (!type_isstring(arg1) || !type_isstring(arg2)) {
+		DEBUG_ERROR("Fail concat, bad argument types");
 		return;
 	}
-	u64 final_size = arg1->value_string.size + arg2->value_string.size;
-	struct ExpressionT* result = alloc_string(ctx, final_size);
+	u64 final_size =
+		type_string_get_length(arg1) + type_string_get_length(arg2);
+	struct ExpressionT* result = type_string_alloc(ctx, final_size);
 	if (!result) {
 		DEBUG_ERROR("Fail here, cannot allocate fixme");
 		return;
 	}
-	c_strcpy_s(result->value_string.content,
-		arg1->value_string.size, arg1->value_string.content);
-	c_strcpy_s(result->value_string.content+arg1->value_string.size,
-		arg2->value_string.size, arg2->value_string.content);
+	char *destp = type_string_getp(result);
+	c_strcpy_s(destp, type_string_get_length(arg1), type_string_getp(arg1));
+
+	c_strcpy_s(destp + type_string_get_length(arg1),
+		type_string_get_length(arg2), type_string_getp(arg2));
 
 	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
 	*ret_place = result;
@@ -1597,11 +1598,11 @@ void builtin_stdout(struct context* ctx) {
 	}
 	struct ExpressionT *arg1;
 	arg1 = interpreter_get_arg(ctx, 1);
-	if (arg1->expr_type != STRING) {
-		DEBUG_ERROR("Fail here, bad argument types");
+	if (!type_isstring(arg1)) {
+		DEBUG_ERROR("Fail stdout, bad argument type, str expected");
 		return;
 	}
-	sys_write(1, arg1->value_string.content, arg1->value_string.size);
+	sys_write(1, type_string_getp(arg1), type_string_get_length(arg1));
 	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
 	*ret_place = (void*)1;
 }
