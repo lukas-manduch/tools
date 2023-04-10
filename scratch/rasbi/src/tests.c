@@ -39,11 +39,13 @@ void test_assert(char bool_value, const char* some_string, const char* content) 
 #define TEST_ASSERT(x) test_assert(x,  __FILE__ ":" TEST_LINE , __LINE_STR(x))
 #include <src/lib_tests.c>
 #include <src/type_tests.c>
+#include <src/runtime_tests.c>
 
 void run_tests() {
 	sys_write(1, "LIB TESTS:\n", 11);
 	run_tests_lib();
 	sys_write(1, "TYPE TESTS:\n", 12);
 	run_tests_types();
+	run_tests_runtime();
 }
 

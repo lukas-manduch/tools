@@ -55,6 +55,11 @@ enum ExpressionType {
 	TYPE_STRING   = 1 << 6,
 };
 
+enum ErrorCodes {
+	ERROR_GENERAL     = 1,
+	ERROR_ARGUMENT    = 2,
+};
+
 // enum RuntimeErrors {
 // 	RUNTIME_ARGUMENT_COUNT,
 // };
@@ -1587,6 +1592,94 @@ i64 runtime_read_file(const char* filename, char* buffer, u32 buf_size) {
 		DEBUG_ERROR("Sys close failed");
 	}
 	return len_read;
+}
+
+/** Print string to destination and return size of printed string.
+ * On Success returns count of written bytes up to max_size.
+ * On failiure - if size of string is larger than max size, returns -1
+ */
+i64 _runtime_format_str(char* destination, u32 max_size, const char* source) {
+	const char* src = source;
+	for (u32 i = 0; i < max_size; i++) {
+		if (*src) {
+			*destination = *src;
+			destination++;
+			src++;
+		} else {
+			return i;
+		}
+	}
+	if (!(*src)) { // Length was exactly the size of buffer
+		return max_size;
+	}
+	return -1;
+}
+
+/** Classic formatting function. Prints formatted function to destination.
+ * On success, returns number of written bytes.
+ * On failure retuns negative error code. Currently on ERROR_ARGUMENT is
+ * possible.
+ */
+i64 runtime_format(const char* format,
+		char* buffer,
+		u64 buffer_size,
+		const u64* argv) {
+	const char* fmt = format;
+	u32 argv_index = 0;
+	u32 buffer_left = buffer_size;
+	char is_formatting = FALSE;  // Is next symbol formatter?
+	char* destination = buffer;
+
+loop:
+	// Error handling
+	if (buffer_left == 0) {
+		return -ERROR_ARGUMENT;
+	}
+	if (!*fmt) { // Finish
+		if (buffer_left > 0) {
+			*destination = 0;
+			buffer_left--;
+			return buffer_size - buffer_left;
+
+		}
+		return -ERROR_ARGUMENT; // Cannot fit ending 0
+
+	}
+	// String copying
+	if ((*fmt) == '%') {
+		is_formatting = TRUE;
+		fmt++;
+		goto loop;
+	}
+
+	if (is_formatting) {
+		// Let's print something
+		if (*fmt == 's') {
+			i64 format_ret =
+				_runtime_format_str(destination,
+						buffer_left, (const char*) argv[argv_index]);
+			if (format_ret < 0) {
+				DEBUG_ERROR("Small buffer (format)");
+				return -ERROR_ARGUMENT;
+			}
+			destination += format_ret;
+			buffer_left -= format_ret;
+
+		} else {
+			DEBUG_ERROR("Unsupported format");
+			return -ERROR_ARGUMENT; // Unsupported
+		}
+		argv_index++;
+		is_formatting = FALSE;
+		fmt++;
+	}
+
+	// Just a regular copy
+	*destination = *fmt;
+	destination++;
+	fmt++;
+	buffer_left--;
+	goto loop;
 }
 
 // ============================
