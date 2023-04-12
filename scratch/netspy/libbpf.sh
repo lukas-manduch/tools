@@ -21,3 +21,5 @@ if ! [ -e build ]; then
 fi
 BUILD_STATIC_ONLY=y OBJDIR=build DESTDIR=root make install
 popd
+
+bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
