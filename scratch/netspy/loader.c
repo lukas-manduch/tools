@@ -36,10 +36,8 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 }
 
 
-int main() {
-	union bpf_attr attr;
-
-
+int main(int argc, const char** argv) {
+	// union bpf_attr attr;
 	// memset(&attr, 0, sizeof(attr));
 	// attr.map_type = BPF_MAP_TYPE_RINGBUF;
 	// attr.max_entries = 1024*10;
@@ -53,12 +51,18 @@ int main() {
 	// 	return 1;
 	// }
 
+	bool debug = false;
+	if (argc == 2 && strcmp(argv[1], "--debug") == 0) {
+		debug = true;
+	}
 
-	printf("Loading something\n");
-	libbpf_set_print(libbpf_print_fn);
+	libbpf_set_print(NULL);
+	if (debug)
+		libbpf_set_print(libbpf_print_fn);
+
 	struct netspy* skeleton = netspy__open();
-	if (netspy__load(skeleton)) {
-		printf("Fuckk\n");
+	if (!skeleton || netspy__load(skeleton)) {
+		fprintf(stderr, "Cannot load filter. Do you have required permissions?\n");
 		return 1;
 	}
 
@@ -71,7 +75,7 @@ int main() {
 
 	int err = netspy__attach(skeleton);
 	if (err != 0) {
-		printf("Attach error");
+		fprintf(stderr, "Error attaching trace %d\n", err);
 		return 1;
 	}
 	printf("PPID\tPID\tBIN\t\tCALL\n");
@@ -83,7 +87,7 @@ int main() {
 			break;
 		}
 		if (err < 0) {
-			printf("Error polling perf buffer: %d\n", err);
+			fprintf(stderr, "Error polling perf buffer: %d\n", err);
 			break;
 		}
 	}

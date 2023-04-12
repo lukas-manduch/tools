@@ -15,7 +15,8 @@ clean:
 	rm -f out/*
 
 
-LIBS := -L out/ -l:libbpf.a -lelf  -lrt -ldl -lpthread -lm -lz  -lelf
+#LIBS := -L out/ -l:libbpf.a -lelf   -lrt -ldl -lpthread -lm -lz  -lelf
+LIBS := -L out/ -l:libbpf.a -l:libelf.a   -lrt -ldl -lpthread -lm -l:libz.a  -lelf
 
 out/loader.exe: out/main.o
 	gcc out/main.o $(LIBS)  -o $@  
