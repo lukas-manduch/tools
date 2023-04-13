@@ -20,52 +20,83 @@ struct bpf_execve {
 	const char *const * envp;
 };
 
+struct bpf_execveat {
+	char unused[8];
+	int syscall_nr;
+	char fd[8];
+	const char* filename;
+	const char *const *argv;
+	const char *const *envp;
+};
+
+// struct bpf_exec {
+// 	const char* filename;
+// 	const char *const *argv;
+// };
+
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, sizeof(struct exec_entry) * 512);
 } rb SEC(".maps");
 
-int map_fd = 1;
-
-// TODO: Execveat
 
 
-SEC("tracepoint/syscalls/sys_enter_execve")
-int enter_connect(struct bpf_execve* something) {
-	struct exec_entry *entry = 
-		bpf_ringbuf_reserve(&rb, sizeof(struct exec_entry), 0);
-	if (!entry)
-		return 1;
-	entry->syscall_nr = something->syscall_nr;
-	bpf_probe_read_user_str(entry->elfname, 255, something->filename);
-	entry->elfname[255] = 0;
-	entry->argc = 0;
-	// ARGV
+void common_setup(struct exec_entry* event) {
+	event->elfname[255] = 0;
+	event->argc = 0;
+	// // My pid
+	unsigned long long ptid = bpf_get_current_pid_tgid();
+	event->pid = ptid>>32;
+	// Parent pid
+	struct task_struct* my_task = (struct task_struct*)bpf_get_current_task();
+	int parent_tgid = BPF_CORE_READ(my_task, real_parent, tgid);
+	event->ppid = parent_tgid;
+}
+
+void common_argv(struct exec_entry* event, const char* const* argv) {
  	for (int i = 0; i < 10; i++) {
  		const char* argvptr = NULL;
- 		bpf_probe_read(&argvptr, sizeof(void*), something->argv + i);
+		bpf_probe_read(&argvptr, sizeof(void*), (argv) + i);
  		if (!argvptr) {
  		 	break;
  		}
  		int argvlen =
  			bpf_probe_read_user_str(
- 		 			entry->argv[i],
+					event->argv[i],
 					ARGUMENT_LENGTH,
  					argvptr);
  		if (argvlen <= 0) {
  		 	break;
  		}
-		entry->argc = i+1;
+		event->argc = i+1;
  	}
-	// My pid
-	unsigned long long ptid = bpf_get_current_pid_tgid();
-	entry->pid = ptid>>32;
-	// Parent pid
-	struct task_struct* my_task = (struct task_struct*)bpf_get_current_task();
-	int parent_tgid = BPF_CORE_READ(my_task, real_parent, tgid);
-	entry->ppid = parent_tgid;
+
+}
+
+SEC("tracepoint/syscalls/sys_enter_execveat")
+int enter_execveat(struct bpf_execveat* event) {
+	struct exec_entry *entry =
+		bpf_ringbuf_reserve(&rb, sizeof(struct exec_entry), 0);
+	if (!entry)
+		return 1;
+	bpf_probe_read_user_str(entry->elfname, 255, event->filename);
+	common_setup(entry);
+	common_argv(entry, event->argv);
 	bpf_ringbuf_submit(entry, 0);
-	return map_fd;
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_execve")
+int enter_execve(struct bpf_execve* event) {
+	struct exec_entry *entry =
+		bpf_ringbuf_reserve(&rb, sizeof(struct exec_entry), 0);
+	if (!entry)
+		return 1;
+	bpf_probe_read_user_str(entry->elfname, 255, event->filename);
+	common_setup(entry);
+	common_argv(entry, event->argv);
+	bpf_ringbuf_submit(entry, 0);
+	return 0;
 }
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
