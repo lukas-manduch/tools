@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <time.h>
 #include <linux/bpf.h>
 
 #include <unistd.h>
@@ -26,8 +27,28 @@ static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va
 
 static int handle_event(void *ctx, void *data, size_t data_sz)
 {
+	// Get UTC time
+	const int time_buf_size = 60; // yolo
+	time_t local_time = time(NULL);
+	struct tm* utc_time = gmtime(&local_time);
+	char time_buffer[time_buf_size];
+	strcpy(time_buffer, "0000-00-00T00:00:00.000");
+	if (utc_time) {
+		sprintf(time_buffer, "%d-%02d-%02dT%02d:%02d:%02d.000",
+				utc_time->tm_year + 1900,
+				utc_time->tm_mon,
+				utc_time->tm_mday,
+				utc_time->tm_hour,
+				utc_time->tm_min,
+				utc_time->tm_sec);
+	}
+	time_buffer[time_buf_size-1] = 0;
+
+	// Extract data
 	struct exec_entry* dat = (struct exec_entry*) data;
-	printf("%d\t%d\t%s\t", dat->ppid, dat->pid, dat->elfname);
+
+	// Print data
+	printf("%s\t%d\t%d\t%s\t", time_buffer, dat->ppid, dat->pid, dat->elfname);
 	for (int i = 0; i < dat->argc; i++) {
 		printf("%s ", dat->argv[i]);
 	}
@@ -37,20 +58,6 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 
 
 int main(int argc, const char** argv) {
-	// union bpf_attr attr;
-	// memset(&attr, 0, sizeof(attr));
-	// attr.map_type = BPF_MAP_TYPE_RINGBUF;
-	// attr.max_entries = 1024*10;
-	// attr.key_size = 0;
-	// attr.value_size = 8;
-	// errno = 0;
-	// int bpf_ret = bpf(BPF_MAP_CREATE, &attr, offsetofend(union bpf_attr, btf_vmlinux_value_type_id));
-	// if (bpf_ret <= 0) {
-	// 	printf("Uh oh, map create failed with %d!\n", bpf_ret);
-	// 	perror("Ahoj");
-	// 	return 1;
-	// }
-
 	bool debug = false;
 	if (argc == 2 && strcmp(argv[1], "--debug") == 0) {
 		debug = true;
@@ -78,7 +85,7 @@ int main(int argc, const char** argv) {
 		fprintf(stderr, "Error attaching trace %d\n", err);
 		return 1;
 	}
-	printf("PPID\tPID\tBIN\t\tCALL\n");
+	printf("TIME                    PPID\tPID\tBIN\t\tCALL\n");
 	while (1) {
 		err = ring_buffer__poll(rb, 100 /* timeout, ms */);
 		/* Ctrl-C will cause -EINTR */
