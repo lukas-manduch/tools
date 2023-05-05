@@ -26,6 +26,14 @@ static inline void run_test_c_strncmp() {
 	TEST_ASSERT(c_strncmp("abcd", "abce", 3) == 0);
 	TEST_ASSERT(c_strncmp("abcd", "abce", 4) == -1);
 }
+static inline void run_test_c_memcmp() {
+	char a1[] = {'a','b','c'};
+	char a2[sizeof a1] = {'a','b','d'};
+
+	TEST_ASSERT(c_memcmp(a1, a2, 3) < 0);
+	TEST_ASSERT(c_memcmp(a2, a1, 3) > 0);
+	TEST_ASSERT(c_memcmp(a1, a1, 3) == 0);
+}
 
 static inline void run_test_c_itoa10() {
 	u32 buf_size = 100;
@@ -87,4 +95,5 @@ void run_tests_lib() {
 	run_test_c_strncmp();
 	run_test_c_itoa10();
 	run_test_c_memset();
+	run_test_c_memcmp();
 }

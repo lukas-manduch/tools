@@ -46,6 +46,7 @@ struct AllocEntry {
 };
 _Static_assert(sizeof(struct AllocEntry) == 8, "Bad size AllocEntry");
 
+/* Belongs to struct ExpressionT */
 enum ExpressionType {
 	SYMBOL        = 1 << 1,
 	STRING        = 1 << 2,
@@ -366,6 +367,19 @@ void c_memcpy(void* dest, const void* src, u64 count) {
 		*destc = *srcc;
 		destc++; srcc++;
 	}
+}
+
+i32 c_memcmp(const void* ptr1, const void* ptr2, u32 size) {
+	const char *p1, *p2;
+	p1 = ptr1;
+	p2 = ptr2;
+
+	while (size && *p1 == *p2) {
+		size--;
+		p1++;
+		p2++;
+	}
+	return size == 0 ? 0 : *p1 - *p2;
 }
 
 INLINE i32 is_alphabet(char c) {
