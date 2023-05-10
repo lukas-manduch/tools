@@ -285,6 +285,10 @@ LOCAL void* stack_push_var(struct context* ctx, u64 size) {
 	return &(ctx->stack[ctx->_stack_pointer]);
 }
 
+INLINE void* stack_push_aligned(struct context* ctx, u64 size) {
+	return stack_push_var(ctx, round8(size));
+}
+
 /** Push value on stack and return pointer to value
  */
 void* stack_push_u64(struct context* ctx, u64 value) {
@@ -1117,6 +1121,7 @@ INLINE struct ExpressionT* list_get_car(struct ExpressionT* curr) {
 	return NULL;
 }
 
+
 // ============================
 //   INTERPRETER
 // ============================
@@ -1700,6 +1705,38 @@ loop:
 //   END RUNTIME FUNCTIONS
 // ============================
 
+// ============================
+//   DEBUG FUNCTIONS
+// ============================
+
+void c_printf0(const char* format_string) {
+	char buffer[1000];
+	i64 ret = runtime_format(format_string, buffer, sizeof(buffer), NULL);
+	if (ret >= 0) {
+		sys_write(1, buffer, ret);
+	} else {
+		sys_write(1, "Printf fail\n", 12);
+	}
+}
+
+void c_printf1(const char* format_string, void* arg1) {
+	char buffer[1000];
+	i64 ret = runtime_format(format_string, buffer, sizeof(buffer), &arg1);
+	if (ret >= 0) {
+		sys_write(1, buffer, ret);
+	} else {
+		sys_write(1, "Printf fail\n", 12);
+	}
+}
+
+// ============================
+//   END DEBUG FUNCTIONS
+// ============================
+
+// ============================
+//   BUILTINS
+// ============================
+
 void builtin_concat(struct context* ctx) {
 	u64 argcount = interpreter_get_arg_count(ctx);
 	if (argcount != 2) {
@@ -1783,6 +1820,10 @@ void builtin_read_file(struct context* ctx) {
 	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
 	*ret_place = (void*)result_string;
 }
+
+// ============================
+//   END BUILTINS
+// ============================
 
 #ifdef TEST
 #include "src/tests.c"
