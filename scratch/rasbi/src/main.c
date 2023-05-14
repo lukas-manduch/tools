@@ -50,7 +50,7 @@ _Static_assert(sizeof(struct AllocEntry) == 8, "Bad size AllocEntry");
 enum ExpressionType {
 	SYMBOL        = 1 << 1,
 	STRING        = 1 << 2,
-	CONS          = 1 << 3,
+	TYPE_CONS     = 1 << 3,
 	MEMORY        = 1 << 4,
 	ASSOCA        = 1 << 5,
 	TYPE_STRING   = 1 << 6,
@@ -70,10 +70,11 @@ struct StringExpression {
 	char content[];
 };
 
-// TODO: This probably should be value, pointer is just more work
-
-struct _listExpression {
-	struct ConsCell* cell;
+// This is void, because cons can hold pointers to more than just other
+// ExpressionTs. E.g. AstNodes in parser
+struct _consExpression {
+	void* car;
+	void* cdr;
 };
 
 struct _memoryExpression {
@@ -149,19 +150,19 @@ void print_expression(const struct ExpressionT* expression) {
 			break;
 
 		}
-	case CONS:
-		{
-			sys_write(0, "( ", 2);
-			if (expression->value_list.cell != NULL) {
-				struct ConsCell *curr = expression->value_list.cell;
-				print_expression(curr->car);
-				sys_write(0, " ", 1);
-				print_expression(curr->cdr);
+	// case CONS:
+	// 	{
+	// 		sys_write(0, "( ", 2);
+	// 		if (expression->value_list.cell != NULL) {
+	// 			struct ConsCell *curr = expression->value_list.cell;
+	// 			print_expression(curr->car);
+	// 			sys_write(0, " ", 1);
+	// 			print_expression(curr->cdr);
 
-			}
-			sys_write(0, ")", 2);
-			break;
-		}
+	// 		}
+	// 		sys_write(0, ")", 2);
+	// 		break;
+	// 	}
 	case SYMBOL:
 		{
 			sys_write(0, expression->value_string.content, expression->value_string.size);
@@ -458,6 +459,41 @@ i64 c_itoa10(i64 value, char* buffer, u64 buf_size) {
 //   TYPES
 // ============================
 
+
+// ------ SYBMOL -------
+// Symbol is string like type, that is used to represent names in parser. This
+// type is not used during runtime (only to read parsed code)
+
+/* Safely check if given type is SYMBOL.
+ * Returns TRUE or FALSE
+ */
+u32 type_is_symbol(struct ExpressionT* expr) {
+	if (expr && expr->expr_type == SYMBOL) {
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/* Get pointer to string representing symbol.
+ * On error returns NULL
+ */
+const char* type_symbol_get_str(struct ExpressionT* expr) {
+	if (type_is_symbol(expr)) {
+		return (expr->value_symbol.content);
+	}
+	return NULL;
+}
+
+/* Get size of string that represents symbol.
+ * On error returns 0
+ */
+u32 type_symbol_get_size(struct ExpressionT* expr) {
+	if (type_is_symbol(expr)) {
+		return expr->value_symbol.size;
+	}
+	return 0;
+}
+
 // ------ MEMORY -------
 
 // Memory type is just a chunk of memory allocated on heap.  There are some
@@ -592,7 +628,6 @@ struct ExpressionT* type_string_alloc(struct context* ctx, u32 size) {
 	type_string_set_length(result, size);
 	return result;
 }
-
 
 /** Returns length of string.
  */
@@ -865,6 +900,65 @@ void* type_assoca_get(struct ExpressionT* expr, const char* str, u64 size) {
 	return (void*)*valuep;
 }
 
+
+// -------- CONS --------
+
+// Cons is one of the basic lisp types. For more details on this type, look for
+// common lisp cons.  Here it is used to build linked lists and trees
+
+struct ExpressionT* type_cons_alloc_stack(struct context* ctx) {
+	struct ExpressionT* expr =
+		stack_push_aligned(ctx, sizeof(struct ExpressionT));
+	if (!expr) {
+		DEBUG_ERROR("Cons allocation on stack failed.\n");
+		return NULL;
+	}
+	expr->expr_type = TYPE_CONS;
+	expr->value_cons.car = NULL;
+	expr->value_cons.cdr = NULL;
+	return expr;
+}
+
+/* Check if expression if of type CONS.
+ * Returns TRUE or FALSE
+ */
+u32 type_iscons(struct ExpressionT* expr) {
+	if(expr && expr->expr_type == TYPE_CONS) {
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/* Get/Set CAR/CDR of expr.
+ * On get error returns NULL.
+ */
+INLINE struct ExpressionT* type_cons_car(struct ExpressionT* cons) {
+	if (type_iscons(cons)) {
+		return (struct ExpressionT*)cons->value_cons.car;
+	}
+	return NULL;
+}
+
+INLINE void type_cons_set_car(struct ExpressionT* cons, void* car) {
+	if (type_iscons(cons)) {
+		cons->value_cons.car = car;
+	}
+}
+
+INLINE struct ExpressionT* type_cons_cdr(struct ExpressionT* cons) {
+	if (type_iscons(cons)) {
+		return (struct ExpressionT*)cons->value_cons.cdr;
+	}
+	return NULL;
+}
+
+
+INLINE void type_cons_set_cdr(struct ExpressionT* cons, void* cdr) {
+	if (type_iscons(cons)) {
+		cons->value_cons.cdr = cdr;
+	}
+}
+
 // ============================
 //   END TYPES
 // ============================
@@ -1000,19 +1094,17 @@ Expression* parser_parse_string(
  * This method might call itself recursively
  */
 struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct context* ctx, u64* out_processed) {
-	Expression* ret = NULL;
+	struct ExpressionT* ret = NULL;
 	for (i64 i = 0; i < count || buf[i] != 0; i++) {
 		char c = buf[i];
 		if (c == '(') { // This will be new list
 			// int j = i+1;
-			ret = heap_alloc(ctx, sizeof(Expression));
+			ret = type_cons_alloc_stack(ctx);
 			if (!ret) {
 				DEBUG_ERROR("Memory fail - parser");
 				return NULL;
 			}
 
-			ret->expr_type = CONS;
-			ret->value_list.cell = NULL;
 
 			while (1) { // Load everythin inside expression
 				i = parser_find_next_char(buf,i+1, count);
@@ -1028,33 +1120,30 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 				}
 
 				u64 skip = 0;
-				Expression* es = parser_parse_expression(buf+i, count - i, ctx, &skip);
+				struct ExpressionT* es =
+					parser_parse_expression(buf+i, count - i, ctx, &skip);
 				if (!es) {
 					DEBUG_ERROR("Invalid expression");
 					return NULL;
 				}
 				i += skip - 1;
-				struct ConsCell *cons = heap_alloc(ctx, sizeof(struct ConsCell));
-				if (!cons) {
-					DEBUG_ERROR("Cannot allocate cons");
-					return NULL;
-				}
-				cons->car = es;
-				cons->cdr = NULL;
-				Expression* consExpr = heap_alloc(ctx, sizeof(struct ExpressionT));
-				if (!consExpr) {
-					DEBUG_ERROR("Cons wapper alloc failed");
-					return NULL;
-				}
-				consExpr->expr_type = CONS;
-				consExpr->value_list.cell = cons;
-				if (ret->value_list.cell == NULL) {
-					ret->value_list.cell = cons;
+
+				// Begin list or append to existing list
+				if (type_cons_car(ret) == NULL) {
+					type_cons_set_car(ret, es);
 				} else {
-					struct ConsCell* cur = ret->value_list.cell;
-					while (cur->cdr != NULL)
-						cur = cur->cdr->value_list.cell;
-					cur->cdr = consExpr;
+					struct ExpressionT* new_cons =
+						type_cons_alloc_stack(ctx);
+					if (!new_cons) {
+						DEBUG_ERROR("Cannot allocate cons");
+						return NULL;
+					}
+					type_cons_set_car(new_cons, es);
+					struct ExpressionT* curr = ret;
+					while (type_cons_cdr(curr) != NULL) {
+						curr = type_cons_cdr(curr);
+					}
+					type_cons_set_cdr(curr, new_cons);
 				}
 			}
 			DEBUG_ERROR("Unclosed expression");
@@ -1073,7 +1162,8 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 		}
 		else if (is_alphabet(c)) { // Parse symbol
 			u64 string_size = 0;
-			Expression* expr = parser_parse_symbol(buf+i, count-i, &string_size, ctx);
+			struct ExpressionT* expr =
+				parser_parse_symbol(buf+i, count-i, &string_size, ctx);
 			if (!expr) {
 				DEBUG_ERROR("Cannot parse symbol");
 				return NULL;
@@ -1095,7 +1185,8 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
  *  All structure are allocated on context heap
  */
 int parse_program(struct context* ctx, const char* buf, u64 size) {
-	Expression *exp = parser_parse_expression(buf, size, ctx, NULL);
+	struct ExpressionT *exp =
+		parser_parse_expression(buf, size, ctx, NULL);
 	if  (!exp) {
 		return -1;
 	}
@@ -1173,10 +1264,10 @@ struct ExpressionT** interpreter_get_ret_addr(struct context* ctx) {
  *  Returns either TRUE or FALSE.
  */
 i64 interpreter_is_expr_function_call(struct ExpressionT* expr) {
-	if (!expr || expr->expr_type != CONS) {
+	if (!type_iscons(expr)) {
 		return FALSE;
 	}
-	struct ExpressionT* first = list_get_car(expr);
+	struct ExpressionT* first = type_cons_car(expr);
 	if (first && first->expr_type == SYMBOL) {
 		return TRUE;
 	}
@@ -1218,17 +1309,16 @@ i64 interpreter_push_args(struct context* ctx, struct ExpressionT* expr) {
 	u64 arg_count = 0;
 	u64 function_calls = 0;
 
-	struct ExpressionT* rest = list_get_cdr(expr);
+	struct ExpressionT* rest = type_cons_cdr(expr);
 
-	if(!expr || expr->expr_type != CONS ||
-			list_get_car(expr)->expr_type != SYMBOL) {
+	if(!type_iscons(expr) || !type_is_symbol(type_cons_car(expr))) {
 		DEBUG_ERROR("Invalid function push args");
 		return -1;
 
 	}
 
 	while (rest) {
-		struct ExpressionT * val = list_get_car(rest);
+		struct ExpressionT * val = type_cons_car(rest);
 		if (!val) {
 			DEBUG_ERROR("Invalid function call, (parser error)");
 			return -1;
@@ -1254,7 +1344,7 @@ i64 interpreter_push_args(struct context* ctx, struct ExpressionT* expr) {
 			DEBUG_ERROR("Stack push failed");
 			return -1;
 		}
-		rest = list_get_cdr(rest);
+		rest = type_cons_cdr(rest);
 		arg_count++;
 	}
 	stack_push_u64(ctx, arg_count);
@@ -1269,21 +1359,21 @@ i64 interpreter_push_args(struct context* ctx, struct ExpressionT* expr) {
  */
 struct ExpressionT* interpreter_get_nested_func(
 		struct ExpressionT* expr, u64 position) {
-	if (!expr || expr->expr_type != CONS) {
+	if (!type_iscons(expr)) {
 		DEBUG_ERROR("Expression is not a list (get nested func)");
 		return NULL;
 	}
 	u64 found_count = 0;
 	struct ExpressionT* current = (expr);
 	while (current) {
-		struct ExpressionT* value = list_get_car(current);
+		struct ExpressionT* value = type_cons_car(current);
 		if (interpreter_is_expr_function_call(value)) {
 			found_count++;
 			if (found_count == position) {
 				return value;
 			}
 		}
-		current = list_get_cdr(current);
+		current = type_cons_cdr(current);
 	}
 	return NULL;
 }
@@ -1293,21 +1383,21 @@ void builtin_stdout(struct context* ctx);
 void builtin_read_file(struct context* ctx);
 
 u64 _interpreter_count_expr_nodes_internal(struct ExpressionT* expr) {
-	if (expr->expr_type != CONS) {
+	if (!type_iscons(expr)) {
 		return 0;
 	}
-	struct ExpressionT* car = list_get_car(expr);
-	if (car->expr_type != SYMBOL) {
+	struct ExpressionT* car = type_cons_car(expr);
+	if (!type_is_symbol(car)) {
 		DEBUG_ERROR("Parsing some list - unsupported yet");
 		return 0;
 	}
 
-	struct ExpressionT* cons_expr = list_get_cdr(expr);
+	struct ExpressionT* cons_expr = type_cons_cdr(expr);
 	u64 total_children = 0;
 	while (cons_expr) {
 		total_children += _interpreter_count_expr_nodes_internal(
-			list_get_car(cons_expr));
-		cons_expr = list_get_cdr(cons_expr);
+			type_cons_car(cons_expr));
+		cons_expr = type_cons_cdr(cons_expr);
 	}
 	return total_children + 1;
 }
@@ -1365,7 +1455,7 @@ struct ExpressionT* interpreter_get_function_by_index(
 struct ExpressionT* interpreter_call_function(
 		struct context* ctx, struct ExpressionT* expr) {
 	struct ExpressionT* ret = NULL;
-	struct ExpressionT* func = list_get_car(expr);
+	struct ExpressionT* func = type_cons_car(expr);
 	if (!func) {
 		DEBUG_ERROR("Func error");
 		return ret;
@@ -1574,17 +1664,17 @@ void runtime_panic() {
  */
 i64 runtime_list_length(struct ExpressionT* first) {
 	i64 list_length = 0;
-	while (first && first->value_list.cell) {
-		if (first->expr_type != CONS) { // This list is bad ... error
+	while ((first)) {
+		if (!type_iscons(first)) { // This list is bad ... error
 			DEBUG_ERROR("Bad list to count");
 			return -1;
 		}
-		if (first->value_list.cell->car == NULL) { // Weird but ok probably
+		if (type_cons_car(first) == NULL) { // Weird but ok probably
 			DEBUG_ERROR("Empty cons cell ll");
 			return list_length;
 		}
 		list_length++;
-		first = first->value_list.cell->cdr;
+		first = type_cons_cdr(first);
 
 	}
 	return list_length;
