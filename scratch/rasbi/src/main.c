@@ -57,8 +57,9 @@ enum ExpressionType {
 };
 
 enum ErrorCodes {
-	ERROR_GENERAL     = 1,
-	ERROR_ARGUMENT    = 2,
+	ERROR_GENERAL        = 1,
+	ERROR_ARGUMENT       = 2,
+	ERROR_STACK_ALLOC    = 3,
 };
 
 // enum RuntimeErrors {
@@ -87,17 +88,60 @@ typedef struct ExpressionT {
 	u32 expr_type;
 	u32 pad;
 	union {
-		u64 value64;
 		struct StringExpression value_string;
-		struct _listExpression value_list;
+		struct _consExpression value_cons;
 		struct _memoryExpression value_memory;
 		struct StringExpression value_symbol; // Symbols are strings
 	};
 } Expression;
 
-struct ConsCell {
-	struct ExpressionT* car;
-	struct ExpressionT* cdr;
+
+/* Ast symbols directs interpreter behaviour. They are something
+ * like lightweight version of common/emacs lisp syntax.o
+ *
+ * AST_IF - takes two or three lists. First is always evaluated
+ * and if it evaulates to true, second list is executed. If list
+ * evaluates to false, third list (if exists) is evaluated.
+ *
+ * AST_FUNC - this is just regular function call.
+ *
+ * AST_VALUE - Node contains literal value (some type of struct ExpressionT),
+ * probably string or number
+ */
+enum AstSymbol {
+	AST_IF,
+	AST_FUNC,
+	AST_VALUE,
+	AST_VAR,
+	AST_TAG,
+};
+
+struct AstNode {
+	u32 type;
+	union {
+		// AST_IF
+		struct {
+			void* condition;
+			void* body_true;
+			void* body_false;
+		} ast_if;
+
+		// AST_FUNC
+		struct {
+			// basic parser represenation of function call (only
+			// for debugging purpose)
+			struct ExpressionT* cons;
+			// Type: Symbol - Name of the function
+			struct ExpressionT* name;
+			// Cons of AstNode* to args
+			struct ExpressionT* args;
+		} ast_func;
+
+		// AST_VALUE
+		struct {
+			struct ExpressionT* value;
+		} ast_value;
+	};
 };
 
 /** This is whole state of parser and interpreter.
@@ -111,7 +155,16 @@ struct context {
 	struct ExpressionT* parent_table; // (mem) Function call graph
 	struct ExpressionT* return_values; // (mem) Return values from funtion graph
 	struct ExpressionT* builtins; // (assoca) Builtin functions
+	u64 error_code;
 };
+
+
+// ============================
+//   GLOBAL
+// ============================
+
+// Functions that manipulate state of the entire program.  This is like runtime
+// functions, but not for running program, but for the language itself
 
 static inline u64 round8(u64 num) {
 	return num + (num % 8);
@@ -323,6 +376,14 @@ u64 stack_get_sp(struct context* ctx) {
 void stack_set_sp(struct context* ctx, u64 sp) {
 	ctx->_stack_pointer = sp;
 }
+
+void global_set_error(struct context* ctx, enum ErrorCodes code) {
+	ctx->error_code = code;
+}
+
+// ============================
+//   END GLOBAL
+// ============================
 
 // ============================
 //   LIBRARY
@@ -939,6 +1000,13 @@ INLINE struct ExpressionT* type_cons_car(struct ExpressionT* cons) {
 	return NULL;
 }
 
+/** Return content of car, casted to AstNode
+ * Behaves same as type_ast_node
+ */
+INLINE struct AstNode* type_cons_car_ast(struct ExpressionT* cons) {
+	return (struct AstNode*)type_cons_car(cons);
+}
+
 INLINE void type_cons_set_car(struct ExpressionT* cons, void* car) {
 	if (type_iscons(cons)) {
 		cons->value_cons.car = car;
@@ -952,12 +1020,76 @@ INLINE struct ExpressionT* type_cons_cdr(struct ExpressionT* cons) {
 	return NULL;
 }
 
+/** See type_cons_car_ast
+ */
+INLINE struct AstNode* type_cons_cdr_ast(struct ExpressionT* cons) {
+	return (struct AstNode*)type_cons_cdr(cons);
+}
 
 INLINE void type_cons_set_cdr(struct ExpressionT* cons, void* cdr) {
 	if (type_iscons(cons)) {
 		cons->value_cons.cdr = cdr;
 	}
 }
+
+// ------- AST -----------
+
+// Ast is type used by parser to represent building blocks of program. E.g.
+// each if is one ast block...
+//
+// Ast is allocated on stack, because it is built before interpreter starts
+// running the program, it is also never deleted and therefore no heap
+// structures are necessary
+
+
+INLINE u32 type_ast_is(struct AstNode* ast, enum AstSymbol type) {
+	return ast && ast->type == type;
+}
+
+// AST_FUNC
+void* type_ast_alloc_func(struct context* ctx, struct ExpressionT* expr) {
+	struct AstNode* node = stack_push_aligned(ctx, sizeof(struct AstNode));
+	if (!node) {
+		return NULL;
+	}
+	node->type = AST_FUNC;
+	node->ast_func.cons = expr;
+	return node;
+}
+
+INLINE u32 type_ast_isfunc(struct AstNode* ast) {
+	return type_ast_is(ast, AST_FUNC);
+}
+
+INLINE struct ExpressionT* type_ast_func_expr(struct AstNode* node) {
+	if (!type_ast_isfunc(node))
+		return NULL;
+	return node->ast_func.cons;
+}
+
+// AST_IF
+
+INLINE u32 type_ast_isif(struct AstNode* ast) {
+	return type_ast_is(ast, AST_IF);
+}
+
+// AST_VALUE
+
+INLINE struct AstNode* type_ast_alloc_value(struct context* ctx, struct ExpressionT* expr) {
+	struct AstNode* node = stack_push_aligned(ctx, sizeof(struct AstNode));
+	if (!node) {
+		return NULL;
+	}
+	node->type = AST_VALUE;
+	node->ast_value.value = expr;
+	return node;
+}
+
+INLINE u32 type_ast_isval(struct AstNode* node) {
+	return type_ast_is(node, AST_VALUE);
+}
+
+
 
 // ============================
 //   END TYPES
@@ -1194,24 +1326,121 @@ int parse_program(struct context* ctx, const char* buf, u64 size) {
 	return 0;
 }
 
+int parser_ast_verify_if(struct ExpressionT* expr) {
+	return 1;
+}
+
+struct AstNode* parser_ast_build(struct context*, struct ExpressionT*);
+
+/** Build and allocate function expression
+ */
+struct AstNode* parser_ast_build_func(
+		struct context* ctx,
+		//struct AstNode* node,
+		struct ExpressionT* expr) {
+	if (!type_iscons(expr) || !type_cons_car(expr)) {
+		// TODO: Build error
+		return NULL;
+	}
+	// TODO: verify name is symbol and that each cons have car
+
+	u32 arg_count = 0;
+	{
+		struct ExpressionT* arg = expr; // Point to name
+		while (arg) {
+			arg = type_cons_cdr(arg);
+			if (!arg) {
+				break;
+			}
+			arg_count++;
+		}
+	}
+
+	struct AstNode* func_node = type_ast_alloc_func(ctx, expr);
+	if (!func_node) {
+		global_set_error(ctx, ERROR_STACK_ALLOC);
+		return NULL;
+	}
+	func_node->ast_func.name = type_cons_car(expr);
+
+	struct ExpressionT* curr_cons = type_cons_cdr(expr);
+	struct ExpressionT* last_argument = NULL; // Points inside AstNode
+	while (curr_cons) {
+		struct ExpressionT* raw_argument = type_cons_car(curr_cons);
+		struct AstNode *argument = parser_ast_build(ctx, raw_argument);
+		struct ExpressionT* cons_cell = type_cons_alloc_stack(ctx);
+		if (!argument || !cons_cell) { // Subtree failed
+			return NULL;
+		}
+		type_cons_set_car(cons_cell, argument);
+		if (!last_argument) { // This is first argument
+			func_node->ast_func.args = cons_cell;
+			last_argument = cons_cell;
+		} else { // Just append argument to last one
+			type_cons_set_cdr(last_argument, cons_cell);
+			last_argument = cons_cell;
+		}
+		curr_cons = type_cons_cdr(curr_cons);
+	}
+	return func_node;
+}
+
+struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) {
+	if (type_isstring(expr) || type_is_symbol(expr)) {
+		struct AstNode* ret = type_ast_alloc_value(ctx, expr);
+		if (!ret) {
+			global_set_error(ctx, ERROR_STACK_ALLOC);
+			return NULL;
+		}
+		return ret;
+	}
+
+	if (type_is_symbol(expr)) {
+
+	}
+
+	if (!type_iscons(expr)) {
+		goto error;
+	}
+	struct ExpressionT* t = type_cons_car(expr);
+	if (!type_is_symbol(t)) {
+		goto error;
+	}
+	u32 symbol_size = type_symbol_get_size(t);
+	const char* symbol_str = type_symbol_get_str(t);
+	const char keyword_if[] = {'i', 'f'};
+
+
+	// AST_IF
+	if (symbol_size == sizeof(keyword_if)
+			&& c_memcmp(keyword_if, symbol_str, 2) == 0) {
+		if (parser_ast_verify_if(t)) {
+			DEBUG_ERROR("If is wrong");
+			// TODO: Build error
+			return NULL;
+		}
+		// parser_ast_build(ctx, car(cdr(t)));
+		// parser_ast_build(ctx, car(cdr(cdr(t))));
+		// parser_ast_build(ctx, car(cdr(cdr(cdr(t)))));
+		// // Add if
+	// AST_FUNC
+	} else { // Just regular function call
+		 struct AstNode* node = parser_ast_build_func(ctx, expr);
+		 if (!node) {
+			 // TODO: Build error
+			 DEBUG_ERROR("cannot allocate ast node");
+			 return NULL;
+		 } else {
+			 return node;
+		 }
+	}
+error:
+	return NULL;
+}
+
 // ============================
 //   END PARSERS
 // ============================
-
-INLINE struct ExpressionT* list_get_cdr(struct ExpressionT* curr) {
-	if (curr && curr->expr_type == CONS) {
-		return curr->value_list.cell->cdr;
-	}
-	return NULL;
-}
-
-INLINE struct ExpressionT* list_get_car(struct ExpressionT* curr) {
-	if (curr && curr->expr_type == CONS && curr->value_list.cell->car) {
-		return curr->value_list.cell->car;
-	}
-	return NULL;
-}
-
 
 // ============================
 //   INTERPRETER
@@ -1819,6 +2048,46 @@ void c_printf1(const char* format_string, void* arg1) {
 	}
 }
 
+void debug_to_cstring(struct ExpressionT* src, char* dest, u32 max_size) {
+	c_memset(dest, 0, max_size);
+	if (!type_isstring(src)) {
+		if (max_size > 1)
+			*dest = '?';
+		return;
+	}
+	u32 str_size = type_string_get_length(src);
+	c_memcpy(dest,type_string_getp(src),
+			str_size > max_size? max_size : str_size);
+}
+
+void debug_print_ast(struct AstNode* ast, u32 depth) {
+	for (u32 i = 0; i < depth; i++) {
+		c_printf0(" ");
+	}
+	if (type_ast_isfunc(ast)) {
+		struct ExpressionT* fexpr = type_ast_func_expr(ast);
+		struct ExpressionT* fname = type_cons_car(fexpr);
+		const char* fname_str = type_symbol_get_str(fname);
+		u32 fname_size = type_symbol_get_size(fname);
+		char fname_buf[fname_size+1];
+		fname_buf[fname_size] = 0;
+		if (fname_str)
+			c_memcpy(fname_buf, fname_str, fname_size);
+		c_printf1("func: %s\n", fname_buf);
+		struct ExpressionT* argument = ast->ast_func.args;
+		while(argument) {
+			debug_print_ast(type_cons_car_ast(argument), depth+2);
+			argument = type_cons_cdr_ast(argument);
+		}
+	}
+	else if (type_ast_isval(ast)) {
+		c_printf0("val: ");
+		char buffer[300];
+		debug_to_cstring(ast->ast_value.value, buffer, 300);
+		c_printf1("%s\n", buffer);
+	}
+}
+
 // ============================
 //   END DEBUG FUNCTIONS
 // ============================
@@ -1919,6 +2188,11 @@ void builtin_read_file(struct context* ctx) {
 #include "src/tests.c"
 #endif
 
+void debug_ast(struct context* ctx) {
+	struct AstNode* node = parser_ast_build(ctx, ctx->program);
+	debug_print_ast(node, 0);
+}
+
 void _start() {
 #ifdef TEST
 	run_tests();
@@ -1933,6 +2207,10 @@ void _start() {
 		sys_write(1, err_parse, c_strlen(err_parse));
 		sys_exit(1);
 	}
+
+	debug_ast(&ctx);
+	sys_exit(0);
+
 	if (execute(&ctx) < 0) {
 		const char* err_exec  = "Cannot execute program";
 		sys_write(1, err_exec , c_strlen(err_exec ));
