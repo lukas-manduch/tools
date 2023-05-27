@@ -60,6 +60,7 @@ enum ErrorCodes {
 	ERROR_GENERAL        = 1,
 	ERROR_ARGUMENT       = 2,
 	ERROR_STACK_ALLOC    = 3,
+	ERROR_SYNTAX         = 4,
 };
 
 // enum RuntimeErrors {
@@ -379,6 +380,10 @@ void stack_set_sp(struct context* ctx, u64 sp) {
 
 void global_set_error(struct context* ctx, enum ErrorCodes code) {
 	ctx->error_code = code;
+}
+
+void global_error_syntax(struct context* ctx, struct ExpressionT* expr) {
+	global_set_error(ctx, ERROR_SYNTAX);
 }
 
 // ============================
@@ -1039,7 +1044,7 @@ INLINE void type_cons_set_cdr(struct ExpressionT* cons, void* cdr) {
 //
 // Ast is allocated on stack, because it is built before interpreter starts
 // running the program, it is also never deleted and therefore no heap
-// structures are necessary
+// structure overhead is necessary
 
 
 INLINE u32 type_ast_is(struct AstNode* ast, enum AstSymbol type) {
@@ -1071,6 +1076,18 @@ INLINE struct ExpressionT* type_ast_func_expr(struct AstNode* node) {
 
 INLINE u32 type_ast_isif(struct AstNode* ast) {
 	return type_ast_is(ast, AST_IF);
+}
+
+struct AstNode* type_ast_alloc_if(struct context* ctx) {
+	struct AstNode* node = stack_push_aligned(ctx, sizeof(struct AstNode));
+	if (!node) {
+		return NULL;
+	}
+	node->type = AST_IF;
+	node->ast_if.condition = NULL;
+	node->ast_if.body_true = NULL;
+	node->ast_if.body_false = NULL;
+	return node;
 }
 
 // AST_VALUE
@@ -1326,20 +1343,71 @@ int parse_program(struct context* ctx, const char* buf, u64 size) {
 	return 0;
 }
 
+/** Check that 'if' syntax looks ok.
+ * Return 0 on success or 1 on failure
+ */
 int parser_ast_verify_if(struct ExpressionT* expr) {
-	return 1;
+	if (!type_iscons(expr)) {
+		return 1;
+	}
+	struct ExpressionT* curr = type_cons_car(expr);
+	// Anything can be as if condition, except null
+	if (!curr) {
+		return 1;
+	}
+	curr = type_cons_cdr(expr);
+	if (!type_cons_car(curr)) { // Missing first/true branch
+		return 1;
+	}
+	curr = type_cons_cdr(curr);
+	if (!curr) {// Missing second/false branch -- OK
+		return 0;
+	}
+	if (!type_cons_car(curr)) { // Bad out from parser (empty branch)
+		return 1;
+	}
+	if (type_cons_cdr(curr)) { // Too many branches in if
+		return 1;
+	}
+	return 0;
 }
 
 struct AstNode* parser_ast_build(struct context*, struct ExpressionT*);
+
+struct AstNode* parser_ast_build_if(struct context* ctx, struct ExpressionT* expr) {
+	if(parser_ast_verify_if(expr)) {
+		global_error_syntax(ctx, expr);
+		return NULL;
+	}
+	struct AstNode* if_node = type_ast_alloc_if(ctx);
+	if_node->ast_if.condition = parser_ast_build(ctx, type_cons_car(expr));
+	if (!if_node->ast_if.condition) {
+		return NULL;
+	}
+	struct ExpressionT* body = type_cons_cdr(expr);
+	if_node->ast_if.body_true = parser_ast_build(ctx, type_cons_car(body));
+	if (!if_node->ast_if.body_true) {
+		return NULL;
+	}
+	body = type_cons_cdr(body);
+	if (!body) {
+		// There is no false branch
+		return if_node;
+	}
+	if_node->ast_if.body_false = parser_ast_build(ctx, type_cons_car(body));
+	if(!if_node->ast_if.body_false) {
+		return NULL;
+	}
+	return if_node;
+}
 
 /** Build and allocate function expression
  */
 struct AstNode* parser_ast_build_func(
 		struct context* ctx,
-		//struct AstNode* node,
 		struct ExpressionT* expr) {
 	if (!type_iscons(expr) || !type_cons_car(expr)) {
-		// TODO: Build error
+		global_error_syntax(ctx, expr);
 		return NULL;
 	}
 	// TODO: verify name is symbol and that each cons have car
@@ -1414,15 +1482,13 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 	// AST_IF
 	if (symbol_size == sizeof(keyword_if)
 			&& c_memcmp(keyword_if, symbol_str, 2) == 0) {
-		if (parser_ast_verify_if(t)) {
+		struct AstNode* node = parser_ast_build_if(ctx, type_cons_cdr(expr));
+		if (!node) {
 			DEBUG_ERROR("If is wrong");
 			// TODO: Build error
 			return NULL;
 		}
-		// parser_ast_build(ctx, car(cdr(t)));
-		// parser_ast_build(ctx, car(cdr(cdr(t))));
-		// parser_ast_build(ctx, car(cdr(cdr(cdr(t)))));
-		// // Add if
+		return node;
 	// AST_FUNC
 	} else { // Just regular function call
 		 struct AstNode* node = parser_ast_build_func(ctx, expr);
@@ -2060,11 +2126,30 @@ void debug_to_cstring(struct ExpressionT* src, char* dest, u32 max_size) {
 			str_size > max_size? max_size : str_size);
 }
 
+void debug_print_error(struct context* ctx) {
+	switch (ctx->error_code) {
+		case 0:
+			c_printf0("No Error\n");
+			break;
+		case ERROR_ARGUMENT:
+			c_printf0("Bad argument\n");
+			break;
+		case ERROR_SYNTAX:
+			c_printf0("Bad syntax\n");
+			break;
+		default:
+			c_printf0("Unknown error\n");
+	}
+
+}
+
 void debug_print_ast(struct AstNode* ast, u32 depth) {
 	for (u32 i = 0; i < depth; i++) {
 		c_printf0(" ");
 	}
-	if (type_ast_isfunc(ast)) {
+	if (!ast) {
+		c_printf0("NULL\n");
+	}else if (type_ast_isfunc(ast)) {
 		struct ExpressionT* fexpr = type_ast_func_expr(ast);
 		struct ExpressionT* fname = type_cons_car(fexpr);
 		const char* fname_str = type_symbol_get_str(fname);
@@ -2073,18 +2158,23 @@ void debug_print_ast(struct AstNode* ast, u32 depth) {
 		fname_buf[fname_size] = 0;
 		if (fname_str)
 			c_memcpy(fname_buf, fname_str, fname_size);
-		c_printf1("func: %s\n", fname_buf);
+		c_printf1("FUNC: %s\n", fname_buf);
 		struct ExpressionT* argument = ast->ast_func.args;
 		while(argument) {
 			debug_print_ast(type_cons_car_ast(argument), depth+2);
-			argument = type_cons_cdr_ast(argument);
+			argument = type_cons_cdr(argument);
 		}
 	}
 	else if (type_ast_isval(ast)) {
 		c_printf0("val: ");
 		char buffer[300];
 		debug_to_cstring(ast->ast_value.value, buffer, 300);
-		c_printf1("%s\n", buffer);
+		c_printf1("\"%s\"\n", buffer);
+	} else if (type_ast_isif(ast)) {
+		c_printf0("IF\n");
+		debug_print_ast(ast->ast_if.condition, depth+2);
+		debug_print_ast(ast->ast_if.body_true, depth+2);
+		debug_print_ast(ast->ast_if.body_false, depth+2);
 	}
 }
 
@@ -2191,6 +2281,7 @@ void builtin_read_file(struct context* ctx) {
 void debug_ast(struct context* ctx) {
 	struct AstNode* node = parser_ast_build(ctx, ctx->program);
 	debug_print_ast(node, 0);
+	debug_print_error(ctx);
 }
 
 void _start() {
