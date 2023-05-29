@@ -16,6 +16,8 @@ u64 sys_stat_stat_get_size(void* statbuf);
 i64 sys_open(const char *filename, i32 flags, i32 mode);
 i32 sys_open_flag_read();
 i32 sys_close(u32 fd);
+u64 platform_get_argc();
+char* platform_get_argv(u32 index);
 
 // These two are really important to be inlined even in debug builds :)
 __attribute__((always_inline)) static inline void sys_stack_push_u64(u64 value)  {
@@ -61,6 +63,7 @@ enum ErrorCodes {
 	ERROR_ARGUMENT       = 2,
 	ERROR_STACK_ALLOC    = 3,
 	ERROR_SYNTAX         = 4,
+	ERROR_PARSER         = 5,
 };
 
 // enum RuntimeErrors {
@@ -1939,7 +1942,6 @@ int execute(struct context* ctx) {
 /** Return file size in bytes of file FILENAME
  * On error returns -1
  */
-
 i64 runtime_get_file_size(const char* filename) {
 	char buffer[sys_stat_stat_struct_len()];
 	if (sys_stat(filename, buffer)) {
@@ -2186,6 +2188,10 @@ void debug_print_ast(struct AstNode* ast, u32 depth) {
 //   BUILTINS
 // ============================
 
+// Builtins are functions, that are called directly from lisp, e.g. + - concat.
+// These functions, cannot be called from C directly, because they work with
+// interpreter's stack
+
 void builtin_concat(struct context* ctx) {
 	u64 argcount = interpreter_get_arg_count(ctx);
 	if (argcount != 2) {
@@ -2281,32 +2287,51 @@ void builtin_read_file(struct context* ctx) {
 void debug_ast(struct context* ctx) {
 	struct AstNode* node = parser_ast_build(ctx, ctx->program);
 	debug_print_ast(node, 0);
-	debug_print_error(ctx);
 }
 
-void _start() {
-#ifdef TEST
-	run_tests();
-#endif
-	//const char* command = "(concat \"some long string here\"   \" And this one \" )";
-	//const char* command = "(write ( concat  \"some \" \" string \")  )";
-	const char* command = "(write (readfile \"/etc/pam.con\"))";
+// ============================
+//   REPL
+// ============================
+
+// Group of functions, that are used to run language as standalone interpreter,
+// instead of embedded thing. This doesn't mean only for repl mode.
+
+void repl_main() {
+	u32 argc = platform_get_argc();
+	if (argc != 2) { // Repl mode is not currently supported
+		c_printf0(REPL_HELP);
+		return;
+	}
+	char* argv = platform_get_argv(1);
+	i64 script_size = runtime_get_file_size(argv);
+	if (script_size < 0) {
+		c_printf0(REPL_FILE_ERROR);
+		return;
+	}
+	char content[script_size];
+	i64 result = runtime_read_file(argv, content, script_size);
+	if (result < 0) {
+		c_printf0(REPL_FILE_ERROR);
+		return;
+	}
 	struct context ctx;
 	init_context(&ctx);
-	if (parse_program(&ctx, command, c_strlen(command)) < 0) {
-		const char* err_parse = "Cannot parse program";
-		sys_write(1, err_parse, c_strlen(err_parse));
+	if (parse_program(&ctx, content, c_strlen(content)) < 0) {
+		global_set_error(&ctx, ERROR_PARSER);
+		debug_print_error(&ctx);
 		sys_exit(1);
 	}
 
 	debug_ast(&ctx);
-	sys_exit(0);
+}
 
-	if (execute(&ctx) < 0) {
-		const char* err_exec  = "Cannot execute program";
-		sys_write(1, err_exec , c_strlen(err_exec ));
-		sys_exit(1);
-
-	}
+// ============================
+//   END REPL
+// ============================
+void _start() {
+#ifdef TEST
+	run_tests();
+#endif
+	repl_main();
 	sys_exit(0);
 }

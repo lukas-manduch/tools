@@ -108,3 +108,45 @@ i64 sys_close(u32 fd) {
  	       );
 	return ret;
 }
+
+/** Return pointer to 0 in stack, that is pushed before entry point call.
+ * This climbs down base pointers, so this must be turned on.
+ */
+void* _platform_stack_bot() {
+	u64* ret;
+	__asm__ volatile (
+			"movq (%%rbp), %%rax\n\t"
+			"leaq (%%rbp), %%rcx\n\t"
+			"1:cmpq $0, %%rax\n\t"
+			"je 2f\n\t"
+			"leaq (%%rax), %%rcx\n\t"
+			"movq (%%rax), %%rax\n\t"
+			"jmp 1b\n\t"
+			"2:movq %%rcx, %0 \n\t"
+			: "=rm" (ret)
+			:
+			: "rax", "rcx"
+			);
+	return ret;
+}
+
+/** Get argc from bottom of the stack.
+ * This will only work, if compiled program uses ebp
+ */
+u64 platform_get_argc() {
+	u64* stack_bot = _platform_stack_bot();
+	stack_bot++;
+	return *stack_bot;
+}
+
+/** Get arg[index] from bottom of the stack.
+ * This will only work, if compiled program uses ebp
+ */
+char* platform_get_argv(u32 index) {
+	u64* stack_bot = _platform_stack_bot();
+	stack_bot++;
+	stack_bot++;
+	while (index--)
+		stack_bot++;
+	return (char*)(*stack_bot);
+}

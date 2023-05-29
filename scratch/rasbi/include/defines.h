@@ -17,6 +17,7 @@
 
 #if DEBUG == 1
 #define TEST
+#define REPL
 #endif
 _Static_assert(sizeof(u64) == 8, "Bad size");
 _Static_assert(sizeof(i64) == 8, "Bad size");
@@ -28,3 +29,9 @@ _Static_assert(sizeof(u16) == 2, "Bad size");
 #error "Bad c version, use std=c17"
 #endif
 
+#ifdef REPL
+#define REPL_HELP "This is rasbi. Copyright 2023 Lukas Manduch\n"\
+	"To run script, call application like:\n"\
+	"rasbi <script_file>\n"
+#define REPL_FILE_ERROR "Problem opening script to run\n"
+#endif
