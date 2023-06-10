@@ -90,7 +90,9 @@ struct _memoryExpression {
 
 typedef struct ExpressionT {
 	u32 expr_type;
-	u32 pad;
+	unsigned char pad0;
+	unsigned char pad1;
+	u16 pad2;
 	union {
 		struct StringExpression value_string;
 		struct _consExpression value_cons;
@@ -111,6 +113,12 @@ typedef struct ExpressionT {
  *
  * AST_VALUE - Node contains literal value (some type of struct ExpressionT),
  * probably string or number
+ *
+ * AST_VAR - scoped variable - by using (let (()) ... ) block, variable is
+ * declared and is availble to be used inside let block. Variable cannot be
+ * used outside. This behavior is kinda like clisp's behavior, except that for
+ * now having multiple declarations in one let block is not supported. But this
+ * can be circumvented by nesting let blocks.
  */
 enum AstSymbol {
 	AST_IF,
@@ -385,7 +393,7 @@ void global_set_error(struct context* ctx, enum ErrorCodes code) {
 	ctx->error_code = code;
 }
 
-void global_error_syntax(struct context* ctx, struct ExpressionT* expr) {
+void global_error_syntax(struct context* ctx, struct ExpressionT*) {
 	global_set_error(ctx, ERROR_SYNTAX);
 }
 
@@ -753,8 +761,10 @@ void type_varchar_create(void* dest, const char* source, u64 source_length) {
 // implementation is not built very efficient, but it has some good basics on
 // which we can build.
 //
-// All entries are always in pairs of string -> 64 bit value (usually pointer)
+// All entries are always in pairs of string(Varchar) -> 64 bit value (usually
+// pointer)
 //
+// All entries (key+value) are always of size divisible by 8.
 //
 //
 
@@ -969,6 +979,129 @@ void* type_assoca_get(struct ExpressionT* expr, const char* str, u64 size) {
 	return (void*)*valuep;
 }
 
+void type_assoca_realloc() {
+
+}
+
+u32 type_assoca_copy(struct ExpressionT* dest, struct ExpressionT* src) {
+    if (!type_isassoca(src) || !type_isassoca(dest)) {
+        return 1;
+    }
+    struct AssocaHeader *header = type_assoca_get_header(src);
+    for (u32 i = 0; i < header->entry_count; i++) {
+        struct Varchar *key = header->entries[i];
+        if (!key) { // Already deleted entry
+            continue;
+        }
+        char* valuep = (char*)key;
+        valuep += type_varchar_get_size(key);
+        u64 result =
+            type_assoca_insert(dest, key->content, key->length, *((u64*)valuep));
+        if (result != 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/** Move pointers next to each other, so that there is no space between them.
+ * This operation is necessary after deletion, because probably will be some
+ * NULL pointer left.
+ */
+void _type_assoca_squeeze_index(struct ExpressionT* expr) {
+	struct AssocaHeader *header = type_assoca_get_header(expr);
+	if (!header) {
+		return;
+	}
+	u32 fixed_count = 0;
+	for (u32 dest = 0; dest < header->entry_count; dest++) {
+		if (header->entries[dest]) {
+			continue;
+		}
+		// Swap this place
+		for (u32 src_index = dest+1;
+				src_index < header->entry_count; src_index++) {
+			if (header->entries[src_index] == NULL) {
+				continue;
+			}
+			// Found good place to swap
+			struct Varchar* tmp = header->entries[dest];
+			// tmp really should be NULL anyway
+			header->entries[dest] = header->entries[src_index];
+			header->entries[src_index] = tmp;
+			fixed_count++;
+			break;
+		}
+	}
+	header->entry_count -= fixed_count;
+}
+
+/** Remove key from assoca.
+ * Returns 0 on success, 1 if key doesn't exist
+ */
+u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size) {
+	struct AssocaHeader *header = type_assoca_get_header(expr);
+	if (!type_isassoca(expr) || !header) {
+		return 1;
+	}
+	struct Varchar *entry = _type_assoca_find_entry(expr, key, key_size);
+	if(!entry) {
+		return 1;
+	}
+	for (u32 i = 0; i < header->entry_count; i++) {
+		if (header->entries[i] == entry) { // Found him
+			header->entries[i] = NULL;
+		}
+	}
+	_type_assoca_squeeze_index(expr);
+	return 0;
+}
+
+/** Sort keys to ascending order
+ */
+void _type_assoca_sort(struct ExpressionT* expr) {
+
+}
+
+/** Shuffle assoca, so that there is  no blank space between entries.
+ * This is potentialy expensive operation, so it  is done only if  there is no
+ * space left for new entry.
+ */
+void _type_assoca_pack(struct ExpressionT* expr) {
+	struct AssocaHeader *header = type_assoca_get_header(expr);
+	if (!header) {
+		return;
+	}
+	struct Varchar *end = (struct Varchar*) // Point behind last checked addr
+		(((char*)header) + _type_assoca_get_header_size(header));
+	for (u32 i = 0; i < header->entry_count; i++) {
+		struct Varchar *smallest = NULL;
+		struct Varchar **smallest_addr = NULL;
+		// Find smallest, not yet moved
+		for (u32 j = 0; j < header->entry_count; j++) {
+			if (header->entries[j] < end) {
+				continue; // Throw away already checked
+			}
+			// Now entry is usable (big enough), but is it the smallest one?
+			if (!smallest || header->entries[j] < smallest) {
+				smallest = header->entries[j];
+				smallest_addr = &header->entries[j];
+			}
+		}
+		if (!smallest) {
+			return;
+		}
+		u64 shift = smallest - end;
+		u64 smallest_size = type_varchar_get_size(smallest) + sizeof(void*);
+		if (shift) {
+			c_memcpy(end, smallest, smallest_size);
+		}
+		*smallest_addr = end; // Edit entry in array
+		end = (struct Varchar*)
+			(((char*)end) + smallest_size);
+	}
+}
+
 
 // -------- CONS --------
 
@@ -1049,6 +1182,11 @@ INLINE void type_cons_set_cdr(struct ExpressionT* cons, void* cdr) {
 // running the program, it is also never deleted and therefore no heap
 // structure overhead is necessary
 
+INLINE struct AstNode* _type_ast_alloc_stack(struct context* ctx) {
+	void* memp = stack_push_aligned(ctx, sizeof(struct AstNode));
+	c_memset(memp, 0, sizeof(struct AstNode));
+	return (struct AstNode*) memp;
+}
 
 INLINE u32 type_ast_is(struct AstNode* ast, enum AstSymbol type) {
 	return ast && ast->type == type;
