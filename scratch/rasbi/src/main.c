@@ -528,6 +528,30 @@ i64 c_itoa10(i64 value, char* buffer, u64 buf_size) {
 }
 
 
+/** Sort array of 64 bit values, given cmp function
+ * Performs insertion sort.
+ * This is to be used in assocas.
+ */
+void c_sort64(void* ptr, u32 count, i32 (*cmp)(const void*, const void*) ) {
+	u64 *arr = (u64*)ptr;
+	for (u32 i = 1; i < count; i++) { // Already sorted part
+		if (cmp(&arr[i-1], &arr[i]) <= 0) { // New is also sorted
+			continue;
+		}
+		// This one is not in it's place, so let's move it
+		for (u32 j = i; j > 0; j--) {
+			if (cmp(&arr[j-1], &arr[j]) > 0) {
+				u64 tmp = arr[j];
+				arr[j] = arr[j-1];
+				arr[j-1] = tmp;
+			} else {
+				break; // Already on correct spot
+			}
+		}
+	}
+
+}
+
 // ============================
 //   END LIBRARY
 // ============================

@@ -86,6 +86,33 @@ static inline void run_test_c_memset() {
 	TEST_ASSERT(aa[3] == 8);
 }
 
+static i32  _cmp(const void* i1, const void* i2) {
+	const u64* lhs = i1;
+	const u64* rhs = i2;
+	return *lhs - *rhs;
+}
+
+static inline void run_test_c_sort64() {
+	i64 arr1[5];
+	i64 target[5];
+	arr1[0] = 1;
+	c_sort64(arr1, 1, _cmp);
+	TEST_ASSERT(arr1[0] == 1);
+	arr1[0] = 5;
+	arr1[1] = 3;
+	arr1[2] = 4;
+	arr1[3] = 1;
+	arr1[4] = 3;
+	//
+	target[0] = 1;
+	target[1] = 3;
+	target[2] = 3;
+	target[3] = 4;
+	target[4] = 5;
+	c_sort64(arr1, 5, _cmp);
+	TEST_ASSERT(c_memcmp(arr1, target, 5) == 0);
+}
+
 void run_tests_lib() {
 	TEST_ASSERT(c_strlen("Ahoj") == 4);
 	TEST_ASSERT(c_strlen("") == 0);
@@ -96,4 +123,5 @@ void run_tests_lib() {
 	run_test_c_itoa10();
 	run_test_c_memset();
 	run_test_c_memcmp();
+	run_test_c_sort64();
 }
