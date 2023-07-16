@@ -1,0 +1,52 @@
+
+<div class="container">
+  <div class="row">
+    <div class="col">
+      <h3>
+        This is SecStore!
+      </h3>
+      <p>
+        You can store your files here, but don't waste server
+        space!
+      </p>
+      <p>
+        This service is not meant for general public, so account
+        creation is not possible here.  Account are created by
+        owner of this site.
+      </p>
+    </div>
+
+    <div class="col">
+      Log in Please!
+      <%= form_with model: @user, url: login_path do |form| %>
+        <div class="mb-3">
+          <label for="exampleInputEmail1" class="form-label">Email address</label>
+          <input type="email" class="form-control" id="exampleInputEmail1" aria-describedby="emailHelp">
+          <div id="emailHelp" class="form-text">We'll never share your email with anyone else.</div>
+        </div>
+        <div class="mb-3">
+          <label for="exampleInputPassword1" class="form-label">Password</label>
+          <input type="password" class="form-control" id="exampleInputPassword1">
+        </div>
+        <button type="submit" class="btn btn-primary">Submit</button>
+
+        <div>
+          <%= form.label :email %>
+          <%= form.text_field :email %>
+        </div>
+        <div>
+          <%= form.label :password %>
+          <%= form.password_field :password %>
+        </div>
+        <div>
+          <%= form.submit "Log in" %>
+        </div>
+      <% end %>
+      <% flash.each do |name, msg| -%>
+        <%= content_tag :div, msg, class: name %>
+      <% end -%>
+
+      </form>
+    </div>
+  </div>
+</div>
