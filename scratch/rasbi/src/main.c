@@ -1411,7 +1411,19 @@ INLINE u32 type_ast_isval(struct AstNode* node) {
 	return type_ast_is(node, AST_VALUE);
 }
 
+// AST_VAR
+INLINE struct AstNode* type_ast_alloc_var(struct context* ctx) {
+	struct AstNode* node = _type_ast_alloc_stack(ctx);
+	if (!node) {
+		return NULL;
+	}
+	node->type = AST_VAR;
+	return node;
+}
 
+INLINE u32 type_ast_isvar(struct AstNode* node) {
+	return type_ast_is(node, AST_VAR);
+}
 
 // ============================
 //   END TYPES
@@ -1677,7 +1689,50 @@ int parser_ast_verify_if(struct ExpressionT* expr) {
 	return 0;
 }
 
+int parser_ast_verify_let(struct ExpressionT* expr) {
+	if (!type_iscons(expr)) {
+		return 1;
+	}
+	struct ExpressionT* variable = type_cons_cdr(expr);
+	struct ExpressionT* body = type_cons_cdr(variable);
+
+	variable = type_cons_car(variable);
+	body = type_cons_car(body);
+
+	// We don't have any requirements of body, except that someting is
+	// present
+	if(!body) {
+		return 1;
+	}
+	// Variable needs to have name (symbol) and something else (anything
+	// valid)
+	if (!type_iscons(variable)) {
+		return 1;
+	}
+
+	struct ExpressionT* var_name = type_cons_car(variable);
+	struct ExpressionT* var_value = type_cons_car(type_cons_cdr(variable));
+
+	if (!type_is_symbol(var_name)) {
+		return 1;
+	}
+	if (!var_value) {
+		return 1;
+	}
+	return 0;
+}
+
 struct AstNode* parser_ast_build(struct context*, struct ExpressionT*);
+
+struct AstNode* parser_ast_build_let(struct context* ctx, struct ExpressionT* expr) {
+	struct AstNode* let_node = type_ast_alloc_var(ctx);
+	if (!let_node) {
+		global_set_error(ctx, ERROR_STACK_ALLOC);
+		return NULL;
+	}
+
+	return let_node;
+}
 
 struct AstNode* parser_ast_build_if(struct context* ctx, struct ExpressionT* expr) {
 	if(parser_ast_verify_if(expr)) {
@@ -1782,6 +1837,7 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 	u32 symbol_size = type_symbol_get_size(t);
 	const char* symbol_str = type_symbol_get_str(t);
 	const char keyword_if[] = {'i', 'f'};
+	const char keyword_let[] = {'l', 'e', 't'};
 
 
 	// AST_IF
@@ -1794,6 +1850,10 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 			return NULL;
 		}
 		return node;
+	// AST_VAR
+	} else if (symbol_size == sizeof(keyword_let)
+			&& c_memcmp(keyword_let, symbol_str, sizeof(keyword_let)) == 0) {
+		//parser_ast_build_let();
 	// AST_FUNC
 	} else { // Just regular function call
 		 struct AstNode* node = parser_ast_build_func(ctx, expr);
@@ -2231,6 +2291,10 @@ int execute(struct context* ctx) {
 		current_function--;
 	}
 }
+
+void interpreter_set_variable();
+void interpreter_create_variable();
+void interpreter_delete_variable();
 
 // ============================
 //   END INTERPRETER
