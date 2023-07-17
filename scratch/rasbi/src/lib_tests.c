@@ -43,6 +43,7 @@ static inline void run_test_c_itoa10() {
 
 	ret = c_itoa10(0, buffer, buf_size);
 	TEST_ASSERT(ret == 1);
+	buffer[1] = 0;
 	TEST_ASSERT(c_strcmp(buffer, "0") == 0);
 
 	ret = c_itoa10(5, buffer, buf_size);
