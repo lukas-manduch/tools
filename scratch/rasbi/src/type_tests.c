@@ -43,13 +43,49 @@ void run_test_types_varchar() {
 	TEST_ASSERT(type_varchar_get_size((struct Varchar*)space) == 16);
 }
 
+void test_assoca_insert1(struct ExpressionT* assoca) {
+	// insert 3 values
+	TEST_ASSERT(type_isassoca(assoca));
+
+	TEST_ASSERT(type_assoca_insert(assoca, "alpha", 5, 44) == 0);
+	TEST_ASSERT(type_assoca_insert(assoca, "xenix", 5, 55) == 0);
+	TEST_ASSERT(type_assoca_insert(assoca, "lexa", 4, 66) == 0);
+}
+
+void test_assoca_content1(struct ExpressionT* assoca) {
+	u64 ret = 0;
+	ret = (u64)type_assoca_get(assoca, "alpha", 5);
+	TEST_ASSERT(ret == 44);
+
+	ret = (u64)type_assoca_get(assoca, "lexa", 4);
+	TEST_ASSERT(ret == 66);
+
+	ret = (u64)type_assoca_get(assoca, "xenix", 5);
+	TEST_ASSERT(ret == 55);
+
+	ret = (u64)type_assoca_get(assoca, "lexa", 3);
+	TEST_ASSERT(ret == 0);
+}
+
+void test_assoca_copy() {
+	struct context _ctx;
+	struct context *ctx = &_ctx;
+	init_context(ctx);
+	struct ExpressionT* ass = type_assoca_alloc(ctx, 6);
+	struct ExpressionT* ass2 = type_assoca_alloc(ctx, 6);
+	test_assoca_insert1(ass);
+	test_assoca_content1(ass);
+	type_assoca_copy(ass2, ass);
+	test_assoca_content1(ass2);
+
+}
 
 void run_test_types_assoca() {
 	struct context _ctx;
 	struct context *ctx = &_ctx;
 	init_context(ctx);
 
-	struct ExpressionT* ass = type_assoca_alloc(ctx);
+	struct ExpressionT* ass = type_assoca_alloc(ctx, 6);
 	TEST_ASSERT(ass != NULL);
 	TEST_ASSERT(type_isassoca(ass));
 	TEST_ASSERT(type_ismem(ass));
@@ -80,6 +116,8 @@ void run_test_types_assoca() {
 	TEST_ASSERT(type_assoca_insert(ass, "concat", 6, 9875) == 0);
 	val2 = (u64)type_assoca_get(ass, "concat", 6);
 	TEST_ASSERT(val2 == 9875);
+
+	test_assoca_copy();
 }
 
 void run_tests_types() {

@@ -393,8 +393,9 @@ void global_set_error(struct context* ctx, enum ErrorCodes code) {
 	ctx->error_code = code;
 }
 
-void global_error_syntax(struct context* ctx, struct ExpressionT*) {
+void global_error_syntax(struct context* ctx, struct ExpressionT* _e) {
 	global_set_error(ctx, ERROR_SYNTAX);
+	_e = _e; // unused
 }
 
 // ============================
@@ -843,26 +844,30 @@ u64 _type_assoca_header_insert(struct AssocaHeader* header, u64 value) {
 	return 0;
 }
 
-/** Allocate associative array with default size
+/** Allocate associative array with size to contain up to COUNT entries.
+ *  Note: It is possible to fill available memory with fewer than COUNT
+ *  entries, so it is always callers responsibility to check if insert was
+ *  successful.
+ *
+ * Returns pointer on success and NULL on failure (allocation fail)
  */
-struct ExpressionT* type_assoca_alloc(struct context* ctx) {
-	// Size to fit approximately def_count english words
-	const u32 def_count = 6;
-	u32 default_size = sizeof(struct AssocaHeader)
-		+ def_count*sizeof(u64)  // Entries in AssocaHeader
-		+ def_count*sizeof(u64) // References in dictionary
-		+ def_count*8 // Average length of word (My estimate :) )
-		+ def_count*sizeof(struct Varchar);
-	default_size = round8(default_size);
-	struct ExpressionT* result = type_mem_alloc(ctx, default_size);
+struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count) {
+	// Size to fit approximately count english words
+	u32 request_size = sizeof(struct AssocaHeader)
+		+ count*sizeof(u64)  // Entries in AssocaHeader
+		+ count*sizeof(u64) // References in dictionary
+		+ count*8 // Average length of word (My estimate :) )
+		+ count*sizeof(struct Varchar);
+	request_size = round8(request_size);
+	struct ExpressionT* result = type_mem_alloc(ctx, request_size);
 	if (!result) {
 		DEBUG_ERROR("cannot allocate assoca");
 		return NULL;
 	}
 	result->expr_type |= ASSOCA;
-	type_mem_memset(result, 0xdd, default_size); // Always shall succceed
+	type_mem_memset(result, 0xdd, request_size); // Always shall succceed
 	struct AssocaHeader* header = type_assoca_get_header(result);
-	header->entry_max = def_count;
+	header->entry_max = count;
 	header->entry_count = 0;
 	return result;
 }
@@ -1003,9 +1008,6 @@ void* type_assoca_get(struct ExpressionT* expr, const char* str, u64 size) {
 	return (void*)*valuep;
 }
 
-void type_assoca_realloc() {
-
-}
 
 u32 type_assoca_copy(struct ExpressionT* dest, struct ExpressionT* src) {
     if (!type_isassoca(src) || !type_isassoca(dest)) {
@@ -2010,7 +2012,7 @@ struct ExpressionT* interpreter_build_parent_graph(struct context* ctx) {
 }
 
 u64 interpreter_load_builtins(struct context* ctx) {
-	struct ExpressionT* assoca = type_assoca_alloc(ctx);
+	struct ExpressionT* assoca = type_assoca_alloc(ctx, 6);
 	if (!assoca) {
 		return 1;
 	}
