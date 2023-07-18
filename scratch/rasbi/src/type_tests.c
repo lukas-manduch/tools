@@ -77,7 +77,24 @@ void test_assoca_copy() {
 	test_assoca_content1(ass);
 	type_assoca_copy(ass2, ass);
 	test_assoca_content1(ass2);
+}
 
+void test_assoca_pack() {
+	struct context _ctx;
+	struct context *ctx = &_ctx;
+	init_context(ctx);
+	struct ExpressionT* ass = type_assoca_alloc(ctx, 3);
+	TEST_ASSERT(type_isassoca(ass));
+	TEST_ASSERT(type_assoca_insert(ass, "aaaabbbbccccddddeeee", 12, 44) == 0);
+	TEST_ASSERT(type_assoca_insert(ass, "baaabbbbccccddddeeee", 12, 54) == 0);
+	TEST_ASSERT(type_assoca_insert(ass, "caaabbbbccccddddeeee", 12, 64) == 0);
+	// should be full
+
+	TEST_ASSERT(type_assoca_insert(ass, "eee", 3, 44) == 1);
+	TEST_ASSERT(type_assoca_get(ass, "baaabbbbccccddddeeee", 12) != 0);
+	type_assoca_delete(ass, "baaabbbbccccddddeeee", 12);
+	// This insert will fail if pack is not working
+	TEST_ASSERT(type_assoca_insert(ass, "eee", 3, 44) == 0);
 }
 
 void run_test_types_assoca() {
@@ -118,6 +135,7 @@ void run_test_types_assoca() {
 	TEST_ASSERT(val2 == 9875);
 
 	test_assoca_copy();
+	test_assoca_pack();
 }
 
 void run_tests_types() {

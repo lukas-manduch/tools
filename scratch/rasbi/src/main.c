@@ -783,15 +783,48 @@ void type_varchar_create(void* dest, const char* source, u64 source_length) {
 // Associative array
 //
 // This is one of larger types that are present in rasbi.  Current
-// implementation is not built very efficient, but it has some good basics on
-// which we can build.
+// implementation is still missing several pieces to be efficient, but it has
+// some good basics and we are getting there
 //
-// All entries are always in pairs of string(Varchar) -> 64 bit value (usually
-// pointer)
+// - All entries are always in pairs of string(Varchar) -> 64 bit value
+//   (usually pointer)
+// - All entries (key+value) are always of size divisible by 8.
+// - Everything is in one slice of memory
+// - For now, inserts are O(N) and retrieves are O(log(N)), insert speed could
+//   be improved
 //
-// All entries (key+value) are always of size divisible by 8.
+//
+// Example memory layout of array with 4 keys:
+//
+// HEADER         +------------------+
+//   AssocaHeader | entry_count = 4  |
+//                | entry_max = 6    |
+//                | ...              |
+//      entries:  +------------------+
+//                |   addr1          |
+//                |   addr4          |
+//                |   addr3          |
+//                |   addr2          |
+//                |   NULL           |
+//                |   NULL           |
+// BODY           +------------------+
+//            1:  |  varchar (key)   |
+//                |   aaaa           |
+//                |  value = 0xff... |
+//            2:  |  varchar (key)   |
+//                |   zzzz           |
+//                |  value = 0xff... |
+//            3:  |  varchar (key)   |
+//                |   cccc           |
+//                |  value = 0xff... |
+//            4:  |  varchar (key)   |
+//                |   bbbb           |
+//                |  value = 0xff... |
+//                +------------------+
 //
 //
+// Usage: Alloc header
+// realloc copy and so on
 
 struct AssocaHeader {
 	// Tells how many entries are stored in "entries" array
@@ -829,7 +862,7 @@ struct AssocaHeader* type_assoca_get_header(struct ExpressionT* expr) {
 /** Compute assoca header size (used and unused space together)
  */
 u64 _type_assoca_get_header_size(struct AssocaHeader* header) {
-	return sizeof(struct AssocaHeader) +
+	return round8(sizeof(struct AssocaHeader)) +
 		header->entry_max*sizeof(struct Varchar*);
 }
 
@@ -969,13 +1002,19 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
 	// No entry was found, let's insert
 	struct AssocaHeader* header = type_assoca_get_header(expr);
 
-	// Check if space is available
+	// Check if space is available. If not repack and try again
+	for (i32 i = 0; i < 2; i++)
 	{
 		u64 space_left = _type_assoca_count_free_space(expr);
 		u64 space_required =
 			sizeof(struct Varchar) + size + sizeof(void*);
+		space_required = round8(space_required);
 		if (space_required > space_left) {
-			return 1;
+			if (i == 0) {
+				_type_assoca_pack(expr);  // Defragmentation
+			} else {
+				return 1;
+			}
 		}
 	}
 
