@@ -114,10 +114,19 @@ static inline void run_test_c_sort64() {
 	TEST_ASSERT(c_memcmp(arr1, target, 5) == 0);
 }
 
+static void test_round8() {
+
+	TEST_ASSERT(round8(2) == 8);
+	TEST_ASSERT(round8(0) == 0);
+	TEST_ASSERT(round8(8) == 8);
+	TEST_ASSERT(round8(9) == 16);
+}
+
 void run_tests_lib() {
 	TEST_ASSERT(c_strlen("Ahoj") == 4);
 	TEST_ASSERT(c_strlen("") == 0);
 
+	test_round8();
 	run_test_is_alphabet();
 	run_test_c_strcmp();
 	run_test_c_strncmp();

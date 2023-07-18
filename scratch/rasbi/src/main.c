@@ -179,7 +179,7 @@ struct context {
 // functions, but not for running program, but for the language itself
 
 static inline u64 round8(u64 num) {
-	return num + (num % 8);
+	return num + ((8 - (num % 8))%8);
 }
 
 #if DEBUG == 0
@@ -805,6 +805,8 @@ struct AssocaHeader {
 	struct Varchar* entries[];
 };
 
+_Static_assert(sizeof(struct AssocaHeader) == 8, "Bad size AssocaHeader");
+
 /** Check whether expression is assoca.
  * Returns TRUE if is and FALSE if it is not
  */
@@ -853,11 +855,11 @@ u64 _type_assoca_header_insert(struct AssocaHeader* header, u64 value) {
  */
 struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count) {
 	// Size to fit approximately count english words
-	u32 request_size = sizeof(struct AssocaHeader)
+	u32 request_size = round8(sizeof(struct AssocaHeader))
 		+ count*sizeof(u64)  // Entries in AssocaHeader
 		+ count*sizeof(u64) // References in dictionary
-		+ count*8 // Average length of word (My estimate :) )
-		+ count*sizeof(struct Varchar);
+		+ count*sizeof(void*) // Average length of word (my estimate)
+		+ count*round8(sizeof(struct Varchar));
 	request_size = round8(request_size);
 	struct ExpressionT* result = type_mem_alloc(ctx, request_size);
 	if (!result) {
@@ -1089,7 +1091,7 @@ void _type_assoca_sort(struct ExpressionT* expr) {
 
 }
 
-/** Shuffle assoca, so that there is  no blank space between entries.
+/** Shuffle assoca, so that there is no blank space between entries.
  * This is potentialy expensive operation, so it  is done only if  there is no
  * space left for new entry.
  */
