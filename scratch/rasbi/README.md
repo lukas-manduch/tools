@@ -30,6 +30,9 @@ assoiative arrays and it is only type, that interpreter understands.
 - Arrays
 - Linked lists
 - Dictionaries
+  - Defragmentation
+  - Db like design
+  - Everything is fitted into single slice of memory
 
 Other types are used only in cicumstances, where interpreter cannot operate
 anyways. E.g. during parsing, building ast or memory management.

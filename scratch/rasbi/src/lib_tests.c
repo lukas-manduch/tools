@@ -87,7 +87,7 @@ static inline void run_test_c_memset() {
 	TEST_ASSERT(aa[3] == 8);
 }
 
-static i32  _cmp(const void* i1, const void* i2) {
+static i64  _cmp(const void* i1, const void* i2) {
 	const u64* lhs = i1;
 	const u64* rhs = i2;
 	return *lhs - *rhs;
@@ -115,7 +115,6 @@ static inline void run_test_c_sort64() {
 }
 
 static void test_round8() {
-
 	TEST_ASSERT(round8(2) == 8);
 	TEST_ASSERT(round8(0) == 0);
 	TEST_ASSERT(round8(8) == 8);

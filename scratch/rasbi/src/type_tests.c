@@ -92,7 +92,7 @@ void test_assoca_pack() {
 
 	TEST_ASSERT(type_assoca_insert(ass, "eee", 3, 44) == 1);
 	TEST_ASSERT(type_assoca_get(ass, "baaabbbbccccddddeeee", 12) != 0);
-	type_assoca_delete(ass, "baaabbbbccccddddeeee", 12);
+	TEST_ASSERT(type_assoca_delete(ass, "baaabbbbccccddddeeee", 12) == 0);
 	// This insert will fail if pack is not working
 	TEST_ASSERT(type_assoca_insert(ass, "eee", 3, 44) == 0);
 }

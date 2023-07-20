@@ -533,7 +533,7 @@ i64 c_itoa10(i64 value, char* buffer, u64 buf_size) {
  * Performs insertion sort.
  * This is to be used in assocas.
  */
-void c_sort64(void* ptr, u32 count, i32 (*cmp)(const void*, const void*) ) {
+void c_sort64(void* ptr, u32 count, i64 (*cmp)(const void*, const void*) ) {
 	u64 *arr = (u64*)ptr;
 	for (u32 i = 1; i < count; i++) { // Already sorted part
 		if (cmp(&arr[i-1], &arr[i]) <= 0) { // New is also sorted
@@ -868,7 +868,6 @@ u64 _type_assoca_get_header_size(struct AssocaHeader* header) {
 
 /** Insert value on any available position in header.
  * On success return 0. If header is full, return 1.
- * In future, this should also sort exisiting entries
  */
 u64 _type_assoca_header_insert(struct AssocaHeader* header, u64 value) {
 	if (header->entry_count >= header->entry_max) {
@@ -951,6 +950,9 @@ u64 _type_assoca_count_free_space(struct ExpressionT* expr) {
 	void* last_possible_space =
 		&expr->value_memory.mem[expr->value_memory.taken];
 	void* past_last_item = _type_assoca_get_free(expr);
+	if (past_last_item == NULL) {
+		return 0;
+	}
 	return last_possible_space - past_last_item;
 }
 
@@ -976,6 +978,9 @@ struct Varchar* _type_assoca_find_entry(
 	}
 	return (void*)result;
 }
+
+void _type_assoca_pack(struct ExpressionT* expr);
+void _type_assoca_sort(struct ExpressionT* expr);
 
 /** Insert VALUE to associative array EXPR under key STR (with length SIZE).
  * On success retunrs 0, on error 1.
@@ -1015,6 +1020,8 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
 			} else {
 				return 1;
 			}
+		} else {
+			break;  // It will fit, so continue
 		}
 	}
 
@@ -1031,6 +1038,9 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
 	u64 vchar_size = type_varchar_get_size(vchar); // This will get 8 aligned size
 	u64* target_location = (u64*) (((char*)vchar) + vchar_size);
 	*target_location = value;
+
+	// Sort index, because now we have appended new value
+	_type_assoca_sort(expr);
 	return 0;
 }
 
@@ -1085,6 +1095,7 @@ void _type_assoca_squeeze_index(struct ExpressionT* expr) {
 		if (header->entries[dest]) {
 			continue;
 		}
+		fixed_count++;
 		// Swap this place
 		for (u32 src_index = dest+1;
 				src_index < header->entry_count; src_index++) {
@@ -1096,7 +1107,6 @@ void _type_assoca_squeeze_index(struct ExpressionT* expr) {
 			// tmp really should be NULL anyway
 			header->entries[dest] = header->entries[src_index];
 			header->entries[src_index] = tmp;
-			fixed_count++;
 			break;
 		}
 	}
@@ -1124,14 +1134,25 @@ u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size) 
 	return 0;
 }
 
+i64 _type_assoca_cmp(const void* lhs, const void* rhs) {
+	i64 right, left;
+	right = (i64)rhs;
+	left = (i64)lhs;
+	return right - left;
+}
+
 /** Sort keys to ascending order
  */
 void _type_assoca_sort(struct ExpressionT* expr) {
-
+	if (!type_isassoca(expr)) {
+		return;
+	}
+	struct AssocaHeader* header = type_assoca_get_header(expr);
+	c_sort64(header->entries, header->entry_count, _type_assoca_cmp);
 }
 
 /** Shuffle assoca, so that there is no blank space between entries.
- * This is potentialy expensive operation, so it  is done only if  there is no
+ * This is potentialy expensive operation, so it is done only if there is no
  * space left for new entry.
  */
 void _type_assoca_pack(struct ExpressionT* expr) {
