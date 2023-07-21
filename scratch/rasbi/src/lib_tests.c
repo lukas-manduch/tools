@@ -121,6 +121,27 @@ static void test_round8() {
 	TEST_ASSERT(round8(9) == 16);
 }
 
+static void run_test_c_bsearch() {
+	u64 arr1[] = { 1, 2, 3 };
+
+	u64 lf = 3;
+	TEST_ASSERT(c_bsearch(&lf, arr1, 3, _cmp) == &arr1[2]);
+	lf = 2;
+	TEST_ASSERT(c_bsearch(&lf, arr1, 3, _cmp) == &arr1[1]);
+	lf = 1;
+	TEST_ASSERT(c_bsearch(&lf, arr1, 3, _cmp) == &arr1[0]);
+
+	u64 arr2[] = { 1, 2, 3, 4 };
+	lf = 4;
+	TEST_ASSERT(c_bsearch(&lf, arr2, 4, _cmp) == &arr2[3]);
+	lf = 3;
+	TEST_ASSERT(c_bsearch(&lf, arr2, 3, _cmp) == &arr2[2]);
+	lf = 2;
+	TEST_ASSERT(c_bsearch(&lf, arr2, 3, _cmp) == &arr2[1]);
+	lf = 1;
+	TEST_ASSERT(c_bsearch(&lf, arr2, 3, _cmp) == &arr2[0]);
+}
+
 void run_tests_lib() {
 	TEST_ASSERT(c_strlen("Ahoj") == 4);
 	TEST_ASSERT(c_strlen("") == 0);
@@ -133,4 +154,5 @@ void run_tests_lib() {
 	run_test_c_memset();
 	run_test_c_memcmp();
 	run_test_c_sort64();
+	run_test_c_bsearch();
 }

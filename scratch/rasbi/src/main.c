@@ -528,7 +528,6 @@ i64 c_itoa10(i64 value, char* buffer, u64 buf_size) {
 	return digit_count;
 }
 
-
 /** Sort array of 64 bit values, given cmp function
  * Performs insertion sort.
  * This is to be used in assocas.
@@ -553,6 +552,30 @@ void c_sort64(void* ptr, u32 count, i64 (*cmp)(const void*, const void*) ) {
 
 }
 
+void* c_bsearch(const void* key, const void* array,
+		u32 length, i64 (*cmp)(const void*, const void*)) {
+	const u64* arr = array;
+	u32 bottom, top, current;
+	bottom = 0;
+	top = length - 1;
+
+	while (1) {
+		current = (top - bottom) / 2 + bottom;
+		i64 cmp_result = cmp(key, (const void*)&arr[current]);
+		if (cmp_result == 0) {
+			return (void*)&arr[current];
+		}
+		if (top == bottom) {
+			return NULL;
+		}
+		if (cmp_result < 0) {
+			top = current - 1;
+
+		} else { /* (cmp_result > 0) */
+			bottom = current + 1;
+		}
+	}
+}
 // ============================
 //   END LIBRARY
 // ============================
@@ -1135,10 +1158,11 @@ u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size) 
 }
 
 i64 _type_assoca_cmp(const void* lhs, const void* rhs) {
-	i64 right, left;
-	right = (i64)rhs;
-	left = (i64)lhs;
-	return right - left;
+	const struct Varchar  *right, *left;
+	right = rhs;
+	left = lhs;
+	u16 length = left->length > right->length ? right->length : left->length;
+	return c_strncmp(left->content, right->content, length);
 }
 
 /** Sort keys to ascending order
