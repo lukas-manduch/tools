@@ -986,7 +986,22 @@ u64 _type_assoca_count_free_space(struct ExpressionT* expr) {
 	return last_possible_space - past_last_item;
 }
 
+/** Cmp function (sort compatible) for assoca. Works with (struct Varchar*)
+ */
+i64 _type_assoca_cmp(const void* lhs, const void* rhs) {
+	const struct Varchar  *right, *left;
+	right = *(struct Varchar**)rhs;
+	left = *(struct Varchar**)lhs;
+	u16 length = left->length > right->length ? right->length : left->length;
+	i64 ret = c_strncmp(left->content, right->content, length);
+	if (ret != 0) {
+		return ret;
+	}
+	return right->length - left->length;
+}
+
 /** Find STR key in assoca, and return pointer to it's internal structure
+ * Performs linear search through all entries.
  * On error returns NULL
  */
 struct Varchar* _type_assoca_find_entry(
@@ -1009,6 +1024,30 @@ struct Varchar* _type_assoca_find_entry(
 	return (void*)result;
 }
 
+/** Find STR key and return pointer to it's Varchar structure
+ * Performs binary search
+ * Returns pointer to struct Varchar or NULL.
+ */
+struct Varchar* _type_assoca_find_entry2(
+		struct ExpressionT* expr, const char* str, u64 size) {
+	if (!type_isassoca(expr) || size == 0) {
+		return NULL;
+	}
+	struct AssocaHeader *header = type_assoca_get_header(expr);
+	// We need to copy string we are looking for to temporary Varchar
+	// structure, so we can use cmp methods that are used to sort Varchars
+	// in assoca
+	char buffer[round8(size+sizeof(struct Varchar))];
+	struct Varchar* buffer_ptr = buffer;
+	type_varchar_create((void*)buffer, str, size);
+	struct Varchar** result =  c_bsearch((void*)&buffer_ptr,
+			header->entries, header->entry_count, _type_assoca_cmp);
+	if (result) {
+		return *result;
+	}
+	return NULL;
+}
+
 void _type_assoca_pack(struct ExpressionT* expr);
 void _type_assoca_sort(struct ExpressionT* expr);
 
@@ -1025,7 +1064,7 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
 	}
 
 	// Check if entry exists
-	struct Varchar* old_entry = _type_assoca_find_entry(expr, str, size);
+	struct Varchar* old_entry = _type_assoca_find_entry2(expr, str, size);
 	if (old_entry) { // It exists, so just replace it
 		u16 vchar_size = type_varchar_get_size(old_entry);
 		u64* destp = (u64*)
@@ -1078,7 +1117,7 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
  * If STR key doesn't exist, NULL is returned
  */
 void* type_assoca_get(struct ExpressionT* expr, const char* str, u64 size) {
-	struct Varchar* varchar = _type_assoca_find_entry(expr, str, size);
+	struct Varchar* varchar = _type_assoca_find_entry2(expr, str, size);
 	if (!varchar) {
 		return NULL;
 	}
@@ -1151,7 +1190,7 @@ u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size) 
 	if (!type_isassoca(expr) || !header) {
 		return 1;
 	}
-	struct Varchar *entry = _type_assoca_find_entry(expr, key, key_size);
+	struct Varchar *entry = _type_assoca_find_entry2(expr, key, key_size);
 	if(!entry) {
 		return 1;
 	}
@@ -1162,14 +1201,6 @@ u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size) 
 	}
 	_type_assoca_squeeze_index(expr);
 	return 0;
-}
-
-i64 _type_assoca_cmp(const void* lhs, const void* rhs) {
-	const struct Varchar  *right, *left;
-	right = rhs;
-	left = lhs;
-	u16 length = left->length > right->length ? right->length : left->length;
-	return c_strncmp(left->content, right->content, length);
 }
 
 /** Sort keys to ascending order

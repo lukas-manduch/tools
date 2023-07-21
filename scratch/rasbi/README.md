@@ -9,6 +9,7 @@ libraries.
 - Custom types
   - DB like associative arrays, that are fitted in one slice of memory
 - Whole memory footprint is in one chunk of memory
+- Contains simple custom made unit test framework
 
 
 ## Inner workings explained
