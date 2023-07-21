@@ -130,16 +130,25 @@ static void run_test_c_bsearch() {
 	TEST_ASSERT(c_bsearch(&lf, arr1, 3, _cmp) == &arr1[1]);
 	lf = 1;
 	TEST_ASSERT(c_bsearch(&lf, arr1, 3, _cmp) == &arr1[0]);
+	lf = 0;
+	TEST_ASSERT(c_bsearch(&lf, arr1, 3, _cmp) == NULL);
+	lf = 4;
+	TEST_ASSERT(c_bsearch(&lf, arr1, 3, _cmp) == NULL);
 
 	u64 arr2[] = { 1, 2, 3, 4 };
 	lf = 4;
 	TEST_ASSERT(c_bsearch(&lf, arr2, 4, _cmp) == &arr2[3]);
 	lf = 3;
-	TEST_ASSERT(c_bsearch(&lf, arr2, 3, _cmp) == &arr2[2]);
+	TEST_ASSERT(c_bsearch(&lf, arr2, 4, _cmp) == &arr2[2]);
 	lf = 2;
-	TEST_ASSERT(c_bsearch(&lf, arr2, 3, _cmp) == &arr2[1]);
+	TEST_ASSERT(c_bsearch(&lf, arr2, 4, _cmp) == &arr2[1]);
 	lf = 1;
-	TEST_ASSERT(c_bsearch(&lf, arr2, 3, _cmp) == &arr2[0]);
+	TEST_ASSERT(c_bsearch(&lf, arr2, 4, _cmp) == &arr2[0]);
+	TEST_ASSERT(c_bsearch(&lf, arr2, 0, _cmp) == NULL);
+	lf = 0;
+	TEST_ASSERT(c_bsearch(&lf, arr2, 4, _cmp) == NULL);
+	lf = 5;
+	TEST_ASSERT(c_bsearch(&lf, arr2, 4, _cmp) == NULL);
 }
 
 void run_tests_lib() {

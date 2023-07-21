@@ -552,12 +552,19 @@ void c_sort64(void* ptr, u32 count, i64 (*cmp)(const void*, const void*) ) {
 
 }
 
+/** Performs binary search on ARRAY. Element size must be 8 bytes.
+ * Returns pointer to matching element or NULL
+ */
 void* c_bsearch(const void* key, const void* array,
 		u32 length, i64 (*cmp)(const void*, const void*)) {
 	const u64* arr = array;
 	u32 bottom, top, current;
 	bottom = 0;
 	top = length - 1;
+
+	if (!length) {
+		return NULL;
+	}
 
 	while (1) {
 		current = (top - bottom) / 2 + bottom;
@@ -569,7 +576,7 @@ void* c_bsearch(const void* key, const void* array,
 			return NULL;
 		}
 		if (cmp_result < 0) {
-			top = current - 1;
+			top = current;
 
 		} else { /* (cmp_result > 0) */
 			bottom = current + 1;
