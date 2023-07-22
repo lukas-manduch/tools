@@ -812,16 +812,21 @@ void type_varchar_create(void* dest, const char* source, u64 source_length) {
 
 // Associative array
 //
-// This is one of larger types that are present in rasbi.  Current
-// implementation is still missing several pieces to be efficient, but it has
-// some good basics and we are getting there
+// Cutom associative array (dictionary), where keys are strings of arbitrary
+// length and values are always not NULL pointers. This is currently largest
+// type in rasbi.  It is implemented on top of memory slice type, so all data
+// are packed together.
 //
-// - All entries are always in pairs of string(Varchar) -> 64 bit value
-//   (usually pointer)
-// - All entries (key+value) are always of size divisible by 8.
-// - Everything is in one slice of memory
-// - For now, inserts are O(N) and retrieves are O(log(N)), insert speed could
-//   be improved
+//
+// - Assoca starts with index pointing to keys in ascending order
+// - Memory location storing all keys and values is below the index
+// - All entries in memory are always in pairs of string (Varchar)| 64 bit
+//   value (usually pointer)
+// - Both key (varcar) and value (pointer) are always aligned at 8 bytes
+// - Everything is only in one slice of memory
+// - On each insert there is one round of insertion sort, this makes worst case
+//   insert O(N) complexity.
+// - On get, assoca performs binary search, thereofre O (logN) worst
 //
 //
 // Example memory layout of array with 4 keys:
@@ -853,8 +858,19 @@ void type_varchar_create(void* dest, const char* source, u64 source_length) {
 //                +------------------+
 //
 //
-// Usage: Alloc header
-// realloc copy and so on
+// Relevant functions for working with assoca are here:
+u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size);
+u32 type_assoca_copy(struct ExpressionT* dest, struct ExpressionT* src);
+u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 value);
+struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count);
+
+// Standard usage should be to allocate expected size of array (given in
+// expected number of keys). Then insert values until inserts starts failing.
+// This means that array is full and new one (larger) must be allocated and old
+// one copied to new one.
+
+// Implementation of assoca:
+//
 
 struct AssocaHeader {
 	// Tells how many entries are stored in "entries" array
@@ -882,7 +898,7 @@ u32 type_isassoca(struct ExpressionT* expr) {
 
 /** Get pointer to Assoca Header structure
  */
-struct AssocaHeader* type_assoca_get_header(struct ExpressionT* expr) {
+struct AssocaHeader* _type_assoca_get_header(struct ExpressionT* expr) {
 	if (!type_isassoca(expr)) {
 		return NULL;
 	}
@@ -930,7 +946,7 @@ struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count) {
 	}
 	result->expr_type |= ASSOCA;
 	type_mem_memset(result, 0xdd, request_size); // Always shall succceed
-	struct AssocaHeader* header = type_assoca_get_header(result);
+	struct AssocaHeader* header = _type_assoca_get_header(result);
 	header->entry_max = count;
 	header->entry_count = 0;
 	return result;
@@ -955,7 +971,7 @@ struct Varchar* _type_assoca_get_lastp(struct AssocaHeader* header) {
 struct Varchar* _type_assoca_get_free(struct ExpressionT* expr) {
 	if (!type_isassoca(expr))
 		return 0;
-	struct AssocaHeader* header = type_assoca_get_header(expr);
+	struct AssocaHeader* header = _type_assoca_get_header(expr);
 	if (header->entry_count >= header->entry_max) {
 		return NULL;
 	}
@@ -1010,7 +1026,7 @@ struct Varchar* _type_assoca_find_entry(
 	if (!type_isassoca(expr)) {
 		return result;
 	}
-	struct AssocaHeader* header = type_assoca_get_header(expr);
+	struct AssocaHeader* header = _type_assoca_get_header(expr);
 	for (u32 i = 0; i < header->entry_count; i++) {
 		struct Varchar* key = header->entries[i];
 		if (key->length != size)
@@ -1033,7 +1049,7 @@ struct Varchar* _type_assoca_find_entry2(
 	if (!type_isassoca(expr) || size == 0) {
 		return NULL;
 	}
-	struct AssocaHeader *header = type_assoca_get_header(expr);
+	struct AssocaHeader *header = _type_assoca_get_header(expr);
 	// We need to copy string we are looking for to temporary Varchar
 	// structure, so we can use cmp methods that are used to sort Varchars
 	// in assoca
@@ -1055,8 +1071,6 @@ void _type_assoca_sort(struct ExpressionT* expr);
  * On success retunrs 0, on error 1.
  * Currently no realocations are supported
  * TODO: This must take void pointers (and verify not NULL probably)
- * TODO: Sorting
- * TODO: Documentation
  */
 u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 value) {
 	if (!type_isassoca(expr)) {
@@ -1074,7 +1088,7 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
 	}
 
 	// No entry was found, let's insert
-	struct AssocaHeader* header = type_assoca_get_header(expr);
+	struct AssocaHeader* header = _type_assoca_get_header(expr);
 
 	// Check if space is available. If not repack and try again
 	for (i32 i = 0; i < 2; i++)
@@ -1133,7 +1147,7 @@ u32 type_assoca_copy(struct ExpressionT* dest, struct ExpressionT* src) {
     if (!type_isassoca(src) || !type_isassoca(dest)) {
         return 1;
     }
-    struct AssocaHeader *header = type_assoca_get_header(src);
+    struct AssocaHeader *header = _type_assoca_get_header(src);
     for (u32 i = 0; i < header->entry_count; i++) {
         struct Varchar *key = header->entries[i];
         if (!key) { // Already deleted entry
@@ -1155,7 +1169,7 @@ u32 type_assoca_copy(struct ExpressionT* dest, struct ExpressionT* src) {
  * NULL pointer left.
  */
 void _type_assoca_squeeze_index(struct ExpressionT* expr) {
-	struct AssocaHeader *header = type_assoca_get_header(expr);
+	struct AssocaHeader *header = _type_assoca_get_header(expr);
 	if (!header) {
 		return;
 	}
@@ -1186,7 +1200,7 @@ void _type_assoca_squeeze_index(struct ExpressionT* expr) {
  * Returns 0 on success, 1 if key doesn't exist
  */
 u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size) {
-	struct AssocaHeader *header = type_assoca_get_header(expr);
+	struct AssocaHeader *header = _type_assoca_get_header(expr);
 	if (!type_isassoca(expr) || !header) {
 		return 1;
 	}
@@ -1209,7 +1223,7 @@ void _type_assoca_sort(struct ExpressionT* expr) {
 	if (!type_isassoca(expr)) {
 		return;
 	}
-	struct AssocaHeader* header = type_assoca_get_header(expr);
+	struct AssocaHeader* header = _type_assoca_get_header(expr);
 	c_sort64(header->entries, header->entry_count, _type_assoca_cmp);
 }
 
@@ -1218,7 +1232,7 @@ void _type_assoca_sort(struct ExpressionT* expr) {
  * space left for new entry.
  */
 void _type_assoca_pack(struct ExpressionT* expr) {
-	struct AssocaHeader *header = type_assoca_get_header(expr);
+	struct AssocaHeader *header = _type_assoca_get_header(expr);
 	if (!header) {
 		return;
 	}
