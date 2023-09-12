@@ -287,10 +287,6 @@ void* heap_alloc(struct context* context, u64 size) {
 	return (char*)ret + sizeof(struct AllocEntry);
 }
 
-// void heap_free(struct context* ctx, void* memory) {
-//
-// }
-
 LOCAL int init_heap(void* data, u64 size) {
 	if (size <= sizeof(struct AllocEntry)) {
 		DEBUG_ERROR("Heap is too small");
@@ -810,64 +806,71 @@ void type_varchar_create(void* dest, const char* source, u64 source_length) {
 
 // ------ ASSOCA ------
 
-// Associative array
-//
-// Cutom associative array (dictionary), where keys are strings of arbitrary
-// length and values are always not NULL pointers. This is currently largest
-// type in rasbi.  It is implemented on top of memory slice type, so all data
-// are packed together.
-//
-//
-// - Assoca starts with index pointing to keys in ascending order
-// - Memory location storing all keys and values is below the index
-// - All entries in memory are always in pairs of string (Varchar)| 64 bit
-//   value (usually pointer)
-// - Both key (varcar) and value (pointer) are always aligned at 8 bytes
-// - Everything is only in one slice of memory
-// - On each insert there is one round of insertion sort, this makes worst case
-//   insert O(N) complexity.
-// - On get, assoca performs binary search, thereofre O (logN) worst
-//
-//
-// Example memory layout of array with 4 keys:
-//
-// HEADER         +------------------+
-//   AssocaHeader | entry_count = 4  |
-//                | entry_max = 6    |
-//                | ...              |
-//      entries:  +------------------+
-//                |   addr1          |
-//                |   addr4          |
-//                |   addr3          |
-//                |   addr2          |
-//                |   NULL           |
-//                |   NULL           |
-// BODY           +------------------+
-//            1:  |  varchar (key)   |
-//                |   aaaa           |
-//                |  value = 0xff... |
-//            2:  |  varchar (key)   |
-//                |   zzzz           |
-//                |  value = 0xff... |
-//            3:  |  varchar (key)   |
-//                |   cccc           |
-//                |  value = 0xff... |
-//            4:  |  varchar (key)   |
-//                |   bbbb           |
-//                |  value = 0xff... |
-//                +------------------+
-//
-//
+/* Associative arr laksjdklasjdlkasj d dsfakjsdhfa e  kfjsd sd fjhf sladf
+ * aleskf jsdlf sd lfkj sdkfjew rjdj flsdkfj slkkjdsf asdsj fsdlfj lsdkfj ei
+ * jslfjeoifjew
+ *
+ */
+
+/* Associative array
+ *
+ * Cutom associative array (dictionary), where keys are strings of arbitrary
+ * length and values are always not NULL pointers. This is currently largest
+ * type in rasbi.  It is implemented on top of memory slice type, so all data
+ * are packed together.
+ *
+ *
+ * - Assoca starts with index pointing to keys in ascending order
+ * - Memory location storing all keys and values is below the index
+ * - All entries in memory are always in pairs of string (Varchar)| 64 bit
+ *   value (usually pointer)
+ * - Both key (varcar) and value (pointer) are always aligned at 8 bytes
+ * - Everything is only in one slice of memory
+ * - On each insert there is one round of insertion sort, this makes worst case
+ *   insert O(N) complexity.
+ * - On get, assoca performs binary search, thereofre O (logN) worst
+ *
+ *
+ * Example memory layout of array with 4 keys:
+ *
+ * HEADER         +------------------+
+ *   AssocaHeader | entry_count = 4  |
+ *                | entry_max = 6    |
+ *                | ...              |
+ *      entries:  +------------------+
+ *                |   addr1          |
+ *                |   addr4          |
+ *                |   addr3          |
+ *                |   addr2          |
+ *                |   NULL           |
+ *                |   NULL           |
+ * BODY           +------------------+
+ *            1:  |  varchar (key)   |
+ *                |   aaaa           |
+ *                |  value = 0xff... |
+ *            2:  |  varchar (key)   |
+ *                |   zzzz           |
+ *                |  value = 0xff... |
+ *            3:  |  varchar (key)   |
+ *                |   cccc           |
+ *                |  value = 0xff... |
+ *            4:  |  varchar (key)   |
+ *                |   bbbb           |
+ *                |  value = 0xff... |
+ *                +------------------+
+*/
+
 // Relevant functions for working with assoca are here:
 u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size);
 u32 type_assoca_copy(struct ExpressionT* dest, struct ExpressionT* src);
 u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 value);
 struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count);
 
-// Standard usage should be to allocate expected size of array (given in
-// expected number of keys). Then insert values until inserts starts failing.
-// This means that array is full and new one (larger) must be allocated and old
-// one copied to new one.
+/* Standard usage should be to allocate expected size of array (given in
+ * expected number of keys). Then insert values until inserts starts failing.
+ * This means that array is full and new one (larger) must be allocated and old
+ * one copied to new one.
+ */
 
 // Implementation of assoca:
 //
