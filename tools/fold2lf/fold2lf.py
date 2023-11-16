@@ -74,6 +74,13 @@ def build_arguments():
         const=1,
         help="Verbose level 0 - quiet, 1 - stats, 2 - verbose, 3 - debug",
         default=list())
+    parser.add_argument(
+        "--ignore-pattern",
+        action="append",
+        required=False,
+        dest="patterns",
+        default=list(),
+        help="Specify (unix like - glob) pattern, e.g. *.py, to ignore files")
     return parser
 
 
@@ -86,6 +93,9 @@ def get_files(path: pathlib.Path) -> List[pathlib.Path]:
 
 
 def glob_list(pattern_list: List[str], iterable: Iterable[str]) -> List[bool]:
+    """Check if any pattern in pattern list matches iterable. Returns bool list
+    of ITERABLE size. List contains True for matched values, False
+    otherwise."""
     result = list()
     for path in iterable:
         matched = False
@@ -100,12 +110,13 @@ def glob_list(pattern_list: List[str], iterable: Iterable[str]) -> List[bool]:
 
 
 def to_relative(basepath: pathlib.Path, relpath: pathlib.Path) -> str:
+    """Return relative path from base to relpath."""
     pure = pathlib.PurePath(relpath)
     return str(pure.relative_to(basepath))
 
 
 def _check_hit(data: bytes, map: List[bool]) -> bool:
-    """Returns True if data hits zero"""
+    """Returns True if data hits zero."""
     for byte in data:
         if map[byte] == 0:
             return True
@@ -143,7 +154,8 @@ def _detect_binary(names: List[pathlib.Path], dont_check: List[bool]) -> List[bo
         results.append(not is_text(path))
     return results
 
-def print_files(detections):
+def print_files(detections: List[Tuple[pathlib.Path, bool, bool]]):
+    """Print list of files, of verbose setting is on."""
     def print_them(f):
         for path, is_ignored, is_binary in detections:
             if f(is_ignored, is_binary):
@@ -164,6 +176,8 @@ if __name__ == "__main__":
     arg_parser = build_arguments()
     parsed_args = arg_parser.parse_args()
     _VERBOSE = len(parsed_args.v)
+    _BLACK_BLOBS += parsed_args.patterns
+    print_verbose(f"Ignore files patterns: {_BLACK_BLOBS}")
     #####
     base_path: pathlib.Path = parsed_args.folder
     all_files: List[pathlib.Path] = get_files(base_path)
