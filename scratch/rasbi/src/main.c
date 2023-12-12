@@ -103,7 +103,7 @@ typedef struct ExpressionT {
 
 
 /* Ast symbols directs interpreter behaviour. They are something
- * like lightweight version of common/emacs lisp syntax.o
+ * like lightweight version of common/emacs lisp syntax.
  *
  * AST_IF - takes two or three lists. First is always evaluated
  * and if it evaulates to true, second list is executed. If list
@@ -873,7 +873,6 @@ struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count);
  */
 
 // Implementation of assoca:
-//
 
 struct AssocaHeader {
 	// Tells how many entries are stored in "entries" array
@@ -1144,7 +1143,6 @@ void* type_assoca_get(struct ExpressionT* expr, const char* str, u64 size) {
 		(((char*)varchar) + varchar_size);
 	return (void*)*valuep;
 }
-
 
 u32 type_assoca_copy(struct ExpressionT* dest, struct ExpressionT* src) {
     if (!type_isassoca(src) || !type_isassoca(dest)) {
@@ -2390,10 +2388,47 @@ i64 _runtime_format_str(char* destination, u32 max_size, const char* source) {
 	return -1;
 }
 
+i64 _runtime_format_int(char* destination, u32 max_size, i64 source) {
+	// Handle 0
+	if (max_size < 1)
+		return -1;
+	if (source == 0) {
+		*destination = '0';
+		return 1;
+	}
+	i64 written = 0;
+	if (source < 0) { // Handle negative
+		destination[written++] = '-';
+		source *= -1;
+	}
+	while (source) {
+		if (written >= max_size) {
+			return -1;
+		}
+		char modulo  = source % 10;
+		source /= 10;
+		destination[written++] = modulo + '0';
+	}
+
+	// Reverse written number
+	u32 destination_shift = 0;
+	if (*destination == '-')
+		destination_shift = 1;
+	for (char *last = destination + written - 1,
+			*dest = destination + destination_shift;
+			last > dest; last--,dest++) {
+		char tmp = *dest;
+		*dest = *last;
+		*last = tmp;
+	}
+	return written;
+}
+
 /** Classic formatting function. Prints formatted function to destination.
  * On success, returns number of written bytes.
- * On failure retuns negative error code. Currently on ERROR_ARGUMENT is
- * possible.
+ * On failure retuns negative error code. Currently possible errors are:
+ * ERROR_ARGUMENT
+ * ERROR_BUFFER_SIZE
  */
 i64 runtime_format(const char* format,
 		char* buffer,
@@ -2404,7 +2439,6 @@ i64 runtime_format(const char* format,
 	u32 buffer_left = buffer_size;
 	char is_formatting = FALSE;  // Is next symbol formatter?
 	char* destination = buffer;
-
 loop:
 	// Error handling
 	if (buffer_left == 0) {
@@ -2418,7 +2452,6 @@ loop:
 
 		}
 		return -ERROR_ARGUMENT; // Cannot fit ending 0
-
 	}
 	// String copying
 	if ((*fmt) == '%') {
@@ -2428,18 +2461,27 @@ loop:
 	}
 
 	if (is_formatting) {
-		// Let's print something
 		if (*fmt == 's') {
 			i64 format_ret =
 				_runtime_format_str(destination,
 						buffer_left, (const char*) argv[argv_index]);
 			if (format_ret < 0) {
 				DEBUG_ERROR("Small buffer (format)");
-				return -ERROR_ARGUMENT;
+				return -ERROR_BUFFER_SIZE;
 			}
 			destination += format_ret;
 			buffer_left -= format_ret;
-
+		}
+		else if (*fmt == 'd') {
+			i64 format_ret =
+				_runtime_format_int(destination,
+						buffer_left, (i64)argv[argv_index]);
+			if (format_ret < 0) {
+				DEBUG_ERROR("Small buffer (format)");
+				return -ERROR_BUFFER_SIZE;
+			}
+			destination += format_ret;
+			buffer_left -= format_ret;
 		} else {
 			DEBUG_ERROR("Unsupported format");
 			return -ERROR_ARGUMENT; // Unsupported
