@@ -1056,7 +1056,7 @@ struct Varchar* _type_assoca_find_entry2(
 	// structure, so we can use cmp methods that are used to sort Varchars
 	// in assoca
 	char buffer[round8(size+sizeof(struct Varchar))];
-	struct Varchar* buffer_ptr = buffer;
+	struct Varchar* buffer_ptr = (struct Varchar*)buffer;
 	type_varchar_create((void*)buffer, str, size);
 	struct Varchar** result =  c_bsearch((void*)&buffer_ptr,
 			header->entries, header->entry_count, _type_assoca_cmp);
@@ -2519,7 +2519,8 @@ void c_printf0(const char* format_string) {
 
 void c_printf1(const char* format_string, void* arg1) {
 	char buffer[1000];
-	i64 ret = runtime_format(format_string, buffer, sizeof(buffer), &arg1);
+
+	i64 ret = runtime_format(format_string, buffer, sizeof(buffer), (u64*)&arg1);
 	if (ret >= 0) {
 		sys_write(1, buffer, ret);
 	} else {
@@ -2627,7 +2628,7 @@ void builtin_concat(struct context* ctx) {
 	c_strcpy_s(destp, type_string_get_length(arg1), type_string_getp(arg1));
 
 	c_strcpy_s(destp + type_string_get_length(arg1),
-		type_string_get_length(arg2), type_string_getp(arg2));
+			type_string_get_length(arg2), type_string_getp(arg2));
 
 	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
 	*ret_place = result;

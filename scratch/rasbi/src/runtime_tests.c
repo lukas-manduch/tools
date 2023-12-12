@@ -46,7 +46,7 @@ static inline void run_test_runtime_format() {
 	char destination[100];
 	const char* str1 = "Peter";
 	u64 num1 = 88;
-	const u64* args1[] = {(u64*)str1, (u64*)num1};
+	const u64 args1[] = {(u64)str1, (u64)num1};
 	TEST_ASSERT(runtime_format("Hello %s! Your happy number is %d.", destination, 100, (const u64* )args1) == 38);
 	TEST_ASSERT(c_strcmp("Hello Peter! Your happy number is 88.", destination) == 0);
 }
