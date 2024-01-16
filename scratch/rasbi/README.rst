@@ -50,3 +50,10 @@ assoiative arrays and it is only type, that interpreter understands.
 Other types are used only in cicumstances, where interpreter cannot operate
 anyways. E.g. during parsing, building ast or memory management.
 
+..
+        Printf implementation was impossible, due to variadic arguments
+        Getting argv must be written in assembly
+
+	Custom memory manager implementation
+
+	Assoca

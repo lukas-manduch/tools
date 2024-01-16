@@ -19,7 +19,9 @@ i32 sys_close(u32 fd);
 u64 platform_get_argc();
 char* platform_get_argv(u32 index);
 
-// These two are really important to be inlined even in debug builds :)
+// These two are really important to be inlined even in debug builds, because
+// otherwise compiler will generate some stack modification instructions
+
 __attribute__((always_inline)) static inline void sys_stack_push_u64(u64 value)  {
 	__asm__ volatile ("push %0\n\t"
 			:
@@ -38,7 +40,18 @@ __attribute__((always_inline)) static inline u64 sys_stack_pop_u64() {
 //   END PLATFORM
 // ============================
 
+// ============================
+//   FORWARD DECLARATIONS
+// ============================
 
+
+i64 runtime_format(const char* format, char* buffer,
+		u64 buffer_size, const u64* argv);
+
+// ============================
+//   END FORWARD DECLARATIONS
+// ============================
+//
 struct AllocEntry {
 	u32 size;
 	unsigned char pad1;
@@ -63,12 +76,10 @@ enum ErrorCodes {
 	ERROR_ARGUMENT       = 2,
 	ERROR_STACK_ALLOC    = 3,
 	ERROR_SYNTAX         = 4,
-	ERROR_PARSER         = 5,
+	ERROR_BUFFER_SIZE    = 5,
+	ERROR_PARSER         = 16,
+	ERROR_PARSER_CHAR    = 17,
 };
-
-// enum RuntimeErrors {
-// 	RUNTIME_ARGUMENT_COUNT,
-// };
 
 struct StringExpression {
 	u32 size;
@@ -114,7 +125,7 @@ typedef struct ExpressionT {
  * AST_VALUE - Node contains literal value (some type of struct ExpressionT),
  * probably string or number
  *
- * AST_VAR - scoped variable - by using (let (()) ... ) block, variable is
+ * AST_LET - scoped variable - by using (let (()) ... ) block, variable is
  * declared and is availble to be used inside let block. Variable cannot be
  * used outside. This behavior is kinda like clisp's behavior, except that for
  * now having multiple declarations in one let block is not supported. But this
@@ -124,8 +135,8 @@ enum AstSymbol {
 	AST_IF,
 	AST_FUNC,
 	AST_VALUE,
-	AST_VAR,
-	AST_TAG,
+	AST_LET,
+	//AST_TAG,
 };
 
 struct AstNode {
@@ -153,10 +164,30 @@ struct AstNode {
 		struct {
 			struct ExpressionT* value;
 		} ast_value;
+
+		// AST_LET
+		struct {
+			struct ExpressionT* name;
+			struct ExpressionT* initial_value;
+			struct AstNode* function;
+		} ast_let;
 	};
 };
 
-/** This is whole state of parser and interpreter.
+struct ErrorContext {
+	union {
+		struct {
+			struct ExpressionT* text;
+		} parser_ast_error;
+
+		// Parser didn't expect this character
+		struct {
+			char text[CONST_ERROR_PARSER_BUFFER_SIZE];
+		} parser_character_error;
+	};
+};
+
+/** This is complete state of parser and interpreter.
  */
 struct context {
 	char heap[HEAP_SIZE];
@@ -167,9 +198,32 @@ struct context {
 	struct ExpressionT* parent_table; // (mem) Function call graph
 	struct ExpressionT* return_values; // (mem) Return values from funtion graph
 	struct ExpressionT* builtins; // (assoca) Builtin functions
+	// Error handling
 	u64 error_code;
+	struct ErrorContext error_context;
 };
 
+// ===================================
+//   BEGIN LIBRARY
+// ===================================
+
+// Functions that are helpers, but don't have equivalent in libc.  For those
+// there is C library.
+// All functions here begin with prefix lib_
+
+INLINE u32 max2_u32(u32 a, u32 b) {
+	if (a > b) return a;
+	return b;
+}
+
+INLINE u32 min2_u32(u32 a, u32 b) {
+	if (a < b) return a;
+	return b;
+}
+
+// ===================================
+//   END LIBRARY
+// ===================================
 
 // ============================
 //   GLOBAL
@@ -240,6 +294,7 @@ void print_expression(const struct ExpressionT* expression) {
 
 #define DEBUG_ERROR(str) __debug_print(str)
 #endif
+
 
 void* heap_alloc(struct context* context, u64 size) {
 	u32 minimal_alloc = sizeof(struct AllocEntry) + 8;
@@ -333,6 +388,7 @@ void init_context(struct context* ctx) {
 	ctx->parent_table = NULL;
 	ctx->return_values = NULL;
 	ctx->builtins = NULL;
+	ctx->error_code = 0;
 }
 
 LOCAL void* stack_push_var(struct context* ctx, u64 size) {
@@ -385,13 +441,58 @@ void stack_set_sp(struct context* ctx, u64 sp) {
 	ctx->_stack_pointer = sp;
 }
 
-void global_set_error(struct context* ctx, enum ErrorCodes code) {
+/** Return 1 if error is set. 0 otherwise
+ */
+INLINE i32 global_is_error(struct context* ctx) {
+	return ctx->error_code != 0;
+}
+
+INLINE void global_set_error(struct context* ctx, enum ErrorCodes code) {
+	if (global_is_error(ctx))
+		return;
 	ctx->error_code = code;
 }
 
 void global_error_syntax(struct context* ctx, struct ExpressionT* _e) {
+	if (global_is_error(ctx))
+		return;
 	global_set_error(ctx, ERROR_SYNTAX);
-	_e = _e; // unused
+	_e = _e; // unused for now
+}
+
+INLINE void global_set_error_parser_char(struct context* ctx, const char* ptr, u32 length) {
+	if (global_is_error(ctx))
+		return;
+
+	global_set_error(ctx, ERROR_PARSER_CHAR);
+	for (u32 i = 0, max = min2_u32(length, CONST_ERROR_PARSER_BUFFER_SIZE);
+			i < max - 1; i++) {
+		ctx->error_context.parser_character_error.text[i] = ptr[i];
+		ctx->error_context.parser_character_error.text[i+1] = 0;
+	}
+}
+
+INLINE u64 global_get_error(struct context* ctx) {
+	if (ctx)
+		return ctx->error_code;
+	return 0;
+}
+
+void global_format_error(struct context* ctx, char* buffer, u32 max_size) {
+#ifndef REPL
+	const char err_format[] = { 'E' , ':', ' ', '%', 'd', ' ', '%', 's' };
+#endif
+	u64 params[2];
+	u64 error_code = global_get_error(ctx);
+
+	params[0] = error_code;
+
+	if (ctx->error_code == ERROR_PARSER_CHAR) {
+		params[1] = (u64)(ctx->error_context.parser_character_error.text);
+		runtime_format(
+			FORMAT_STRING(err_format, "E: %d, parser error near: %s"),
+			buffer, max_size, params);
+	}
 }
 
 // ============================
@@ -399,7 +500,7 @@ void global_error_syntax(struct context* ctx, struct ExpressionT* _e) {
 // ============================
 
 // ============================
-//   LIBRARY
+//   C LIBRARY
 // ============================
 
 INLINE u32 c_strlen(const char* str) {
@@ -580,7 +681,7 @@ void* c_bsearch(const void* key, const void* array,
 	}
 }
 // ============================
-//   END LIBRARY
+//   END C LIBRARY
 // ============================
 
 // ============================
@@ -595,7 +696,7 @@ void* c_bsearch(const void* key, const void* array,
 /* Safely check if given type is SYMBOL.
  * Returns TRUE or FALSE
  */
-u32 type_is_symbol(struct ExpressionT* expr) {
+INLINE u32 type_is_symbol(struct ExpressionT* expr) {
 	if (expr && expr->expr_type == SYMBOL) {
 		return TRUE;
 	}
@@ -605,7 +706,7 @@ u32 type_is_symbol(struct ExpressionT* expr) {
 /* Get pointer to string representing symbol.
  * On error returns NULL
  */
-const char* type_symbol_get_str(struct ExpressionT* expr) {
+INLINE const char* type_symbol_get_str(struct ExpressionT* expr) {
 	if (type_is_symbol(expr)) {
 		return (expr->value_symbol.content);
 	}
@@ -615,7 +716,7 @@ const char* type_symbol_get_str(struct ExpressionT* expr) {
 /* Get size of string that represents symbol.
  * On error returns 0
  */
-u32 type_symbol_get_size(struct ExpressionT* expr) {
+INLINE u32 type_symbol_get_size(struct ExpressionT* expr) {
 	if (type_is_symbol(expr)) {
 		return expr->value_symbol.size;
 	}
@@ -1412,19 +1513,20 @@ INLINE u32 type_ast_isval(struct AstNode* node) {
 	return type_ast_is(node, AST_VALUE);
 }
 
-// AST_VAR
-INLINE struct AstNode* type_ast_alloc_var(struct context* ctx) {
+// AST_LET
+INLINE struct AstNode* type_ast_alloc_let(struct context* ctx) {
 	struct AstNode* node = _type_ast_alloc_stack(ctx);
 	if (!node) {
 		return NULL;
 	}
-	node->type = AST_VAR;
+	node->type = AST_LET;
 	return node;
 }
 
-INLINE u32 type_ast_isvar(struct AstNode* node) {
-	return type_ast_is(node, AST_VAR);
+INLINE u32 type_ast_islet(struct AstNode* node) {
+	return type_ast_is(node, AST_LET);
 }
+
 
 // ============================
 //   END TYPES
@@ -1641,6 +1743,10 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 		}
 		else {
 			DEBUG_ERROR("Invalid character");
+
+			global_set_error_parser_char(ctx,
+					&buf[i > 2 ? i - 2 : i], count - i);
+
 			return NULL;
 		}
 	}
@@ -1694,20 +1800,18 @@ int parser_ast_verify_let(struct ExpressionT* expr) {
 	if (!type_iscons(expr)) {
 		return 1;
 	}
-	struct ExpressionT* variable = type_cons_cdr(expr);
-	struct ExpressionT* body = type_cons_cdr(variable);
-
-	variable = type_cons_car(variable);
-	body = type_cons_car(body);
+	struct ExpressionT* variable = type_cons_car(type_cons_car(expr));
+	struct ExpressionT* body = type_cons_cdr(expr);
 
 	// We don't have any requirements of body, except that someting is
-	// present
-	if(!body) {
+	// present.
+	if(!body || !type_iscons(body)) {
 		return 1;
 	}
+	// Variable is nested in one extra () according to standard clisp
 	// Variable needs to have name (symbol) and something else (anything
 	// valid)
-	if (!type_iscons(variable)) {
+	if (!variable || !type_iscons(variable)) {
 		return 1;
 	}
 
@@ -1717,7 +1821,9 @@ int parser_ast_verify_let(struct ExpressionT* expr) {
 	if (!type_is_symbol(var_name)) {
 		return 1;
 	}
-	if (!var_value) {
+
+	// Now we only accept strings as valid values
+	if (!type_isstring(var_value)) {
 		return 1;
 	}
 	return 0;
@@ -1822,10 +1928,6 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 			return NULL;
 		}
 		return ret;
-	}
-
-	if (type_is_symbol(expr)) {
-
 	}
 
 	if (!type_iscons(expr)) {
@@ -2699,6 +2801,10 @@ void builtin_read_file(struct context* ctx) {
 void debug_ast(struct context* ctx) {
 	struct AstNode* node = parser_ast_build(ctx, ctx->program);
 	debug_print_ast(node, 0);
+	i64 error_code = global_get_error(ctx);
+	if (error_code) {
+		c_printf1("Error %d\n", (void*)error_code);
+	}
 }
 
 // ============================
@@ -2729,6 +2835,13 @@ void repl_main() {
 	struct context ctx;
 	init_context(&ctx);
 	if (parse_program(&ctx, content, c_strlen(content)) < 0) {
+		if (global_is_error(&ctx)) {
+			char text[100];
+			text[99] = 0;
+			global_format_error(&ctx, text, 100);
+			c_printf1("%s\n",text);
+		}
+
 		global_set_error(&ctx, ERROR_PARSER);
 		debug_print_error(&ctx);
 		sys_exit(1);
@@ -2747,3 +2860,4 @@ void _start() {
 	repl_main();
 	sys_exit(0);
 }
+

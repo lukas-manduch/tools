@@ -15,10 +15,14 @@
 #define i32 int
 #define i64 signed long long
 
+#define CONST_ERROR_PARSER_BUFFER_SIZE 10
+
 #if DEBUG == 1
 #define TEST
+// If ran like repl, there is also .data and .rodata and we have strings
 #define REPL
 #endif
+
 _Static_assert(sizeof(u64) == 8, "Bad size");
 _Static_assert(sizeof(i64) == 8, "Bad size");
 _Static_assert(sizeof(u32) == 4, "Bad size");
@@ -30,8 +34,11 @@ _Static_assert(sizeof(u16) == 2, "Bad size");
 #endif
 
 #ifdef REPL
-#define REPL_HELP "This is rasbi. Copyright 2023 Lukas Manduch\n"\
+#define REPL_HELP "This is rasbi. Copyright 2024 Lukas Manduch\n"\
 	"To run script, call application like:\n"\
 	"rasbi <script_file>\n"
 #define REPL_FILE_ERROR "Problem opening script to run\n"
+#define FORMAT_STRING(simple, complex) complex
+#else
+#define FORMAT_STRING(simple, complex) simple
 #endif
