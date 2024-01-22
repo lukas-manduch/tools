@@ -178,6 +178,7 @@ struct AstNode {
 		// AST_LET
 		struct {
 			struct ExpressionT* name;
+			// TODO: Change initial_value to AST_NODE
 			struct ExpressionT* initial_value;
 			struct AstNode* function;
 		} ast_let;
@@ -1615,15 +1616,22 @@ struct ExpressionT* alloc_symbol(struct context* ctx, u64 length) {
 // ============================
 
 LOCAL i32 parser_find_next_char(const char* buf, u64 start_position, u64 count) {
+	i32 inside_comment = 0;
 	for (u64 i = start_position; i < count; i++) {
-		switch(buf[i]) {
-			case ' ':
-			case '\t':
-			case '\n':
+		if (inside_comment) {
+			if (buf[i] == '\n' || buf[i] == '\r')
+				inside_comment = 0;
+			else
 				continue;
-			default:
-				return i;
 		}
+		if (buf[i] == ';') {
+			inside_comment = 1;
+			continue;
+		}
+		if (c_isspace(buf[i])) {
+			continue;
+		}
+		return i;
 	}
 	return -1;
 }
@@ -1643,10 +1651,13 @@ LOCAL struct ExpressionT* _parser_alloc_symbol_tokens(struct context* ctx) {
 		ptr[i] = 1;
 	for (u32 i = 'A'; i < 'Z'; i++)
 		ptr[i] = 1;
+
 	ptr['+'] = 1;
 	ptr['-'] = 1;
 	ptr['*'] = 1;
 	ptr['/'] = 1;
+	ptr['='] = 1;
+
 	ptr['_'] = 1;
 	ptr['#'] = 1;
 	ptr['!'] = 1;
@@ -1843,10 +1854,11 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 			ret = es;
 			goto ret;
 		}
-		else if (c_isdigit(c)) {
+		else if (c_isdigit(c)) { // Parse integer
 			DEBUG_ERROR("Numbers not implemented");
 			global_set_error_parser_char(ctx, &buf[i], count - i);
 		}
+		// Parse symbol
 		else if (_parser_is_symbol_token(c, symbol_tokens)) {
 			u64 string_size = 0;
 			struct ExpressionT* expr =
