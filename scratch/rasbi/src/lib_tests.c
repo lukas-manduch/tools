@@ -1,10 +1,17 @@
-static inline void run_test_is_alphabet() {
-	TEST_ASSERT(is_alphabet('a') == 1);
-	TEST_ASSERT(is_alphabet('z') == 1);
-	TEST_ASSERT(is_alphabet('A') == 1);
-	TEST_ASSERT(is_alphabet('Z') == 1);
-	TEST_ASSERT(is_alphabet('1') == 0);
-	TEST_ASSERT(is_alphabet('"') == 0);
+static inline void run_test_isalpha() {
+	TEST_ASSERT(c_isalpha('a') == 1);
+	TEST_ASSERT(c_isalpha('z') == 1);
+	TEST_ASSERT(c_isalpha('A') == 1);
+	TEST_ASSERT(c_isalpha('Z') == 1);
+	TEST_ASSERT(c_isalpha('1') == 0);
+	TEST_ASSERT(c_isalpha('"') == 0);
+}
+
+static inline void run_test_small_functions() {
+	TEST_ASSERT(c_isdigit('0') == 1);
+	TEST_ASSERT(c_isdigit('1') == 1);
+	TEST_ASSERT(c_isdigit('9') == 1);
+	TEST_ASSERT(c_isdigit('a') == 0);
 }
 
 static inline void run_test_c_strcmp() {
@@ -156,7 +163,8 @@ void run_tests_lib() {
 	TEST_ASSERT(c_strlen("") == 0);
 
 	test_round8();
-	run_test_is_alphabet();
+	run_test_isalpha();
+	run_test_small_functions();
 	run_test_c_strcmp();
 	run_test_c_strncmp();
 	run_test_c_itoa10();

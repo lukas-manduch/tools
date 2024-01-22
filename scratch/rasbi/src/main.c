@@ -71,12 +71,22 @@ enum ExpressionType {
 	TYPE_STRING   = 1 << 6,
 };
 
+/* Stage types in struct context  */
+enum StageType {
+	STAGE_EMPTY         = 0,
+	STAGE_SYMBOL_TOKENS = 1,
+};
+
+/* Error codes in struct context */
 enum ErrorCodes {
+	ERROR_SUCCESS        = 0, // No error. Placeholder to protect 0
 	ERROR_GENERAL        = 1,
 	ERROR_ARGUMENT       = 2,
 	ERROR_STACK_ALLOC    = 3,
-	ERROR_SYNTAX         = 4,
-	ERROR_BUFFER_SIZE    = 5,
+	ERROR_OOM            = 4,
+	ERROR_SYNTAX         = 5,
+	ERROR_BUFFER_SIZE    = 6,
+	ERROR_CRITICAL       = 7,
 	ERROR_PARSER         = 16,
 	ERROR_PARSER_CHAR    = 17,
 };
@@ -198,6 +208,13 @@ struct context {
 	struct ExpressionT* parent_table; // (mem) Function call graph
 	struct ExpressionT* return_values; // (mem) Return values from funtion graph
 	struct ExpressionT* builtins; // (assoca) Builtin functions
+
+	// This variable represents context, that can be passed with this down
+	// the function call chain.  Each function may read it or replace it
+	// for functions that it will call next.  But after returning, it
+	// should be restored to parents value.
+	void* stage;
+	enum StageType stage_type;
 	// Error handling
 	u64 error_code;
 	struct ErrorContext error_context;
@@ -211,12 +228,12 @@ struct context {
 // there is C library.
 // All functions here begin with prefix lib_
 
-INLINE u32 max2_u32(u32 a, u32 b) {
+INLINE u32 lib_max2_u32(u32 a, u32 b) {
 	if (a > b) return a;
 	return b;
 }
 
-INLINE u32 min2_u32(u32 a, u32 b) {
+INLINE u32 lib_min2_u32(u32 a, u32 b) {
 	if (a < b) return a;
 	return b;
 }
@@ -226,11 +243,14 @@ INLINE u32 min2_u32(u32 a, u32 b) {
 // ===================================
 
 // ============================
-//   GLOBAL
+//   BEGIN GLOBAL
 // ============================
 
 // Functions that manipulate state of the entire program.  This is like runtime
-// functions, but not for running program, but for the language itself
+// functions, but not for running program, but for the language itself.
+//
+// Note: Global in this context means functions that manipulate global state of
+// nterpreted program, not of the entire process
 
 static inline u64 round8(u64 num) {
 	return num + ((8 - (num % 8))%8);
@@ -389,6 +409,7 @@ void init_context(struct context* ctx) {
 	ctx->return_values = NULL;
 	ctx->builtins = NULL;
 	ctx->error_code = 0;
+	ctx->stage = (void*)0;
 }
 
 LOCAL void* stack_push_var(struct context* ctx, u64 size) {
@@ -465,7 +486,7 @@ INLINE void global_set_error_parser_char(struct context* ctx, const char* ptr, u
 		return;
 
 	global_set_error(ctx, ERROR_PARSER_CHAR);
-	for (u32 i = 0, max = min2_u32(length, CONST_ERROR_PARSER_BUFFER_SIZE);
+	for (u32 i = 0, max = lib_min2_u32(length, CONST_ERROR_PARSER_BUFFER_SIZE);
 			i < max - 1; i++) {
 		ctx->error_context.parser_character_error.text[i] = ptr[i];
 		ctx->error_context.parser_character_error.text[i+1] = 0;
@@ -495,13 +516,36 @@ void global_format_error(struct context* ctx, char* buffer, u32 max_size) {
 	}
 }
 
+INLINE void* global_get_stage(struct context* ctx) {
+	if (ctx)
+		return ctx->stage;
+	return NULL;
+}
+
+INLINE void global_set_stage(struct context* ctx, const enum StageType stage_type, void* ptr) {
+	if (ctx) {
+		ctx->stage = ptr;
+		ctx->stage_type = stage_type;
+	}
+}
+
+INLINE enum StageType global_get_stage_type(struct context* ctx) {
+	if (ctx)
+		return ctx->stage_type;
+	return 0;
+}
+
+
 // ============================
 //   END GLOBAL
 // ============================
 
 // ============================
-//   C LIBRARY
+//   BEGIN C LIBRARY
 // ============================
+
+// Replacements for standard libc functions.  All functions have same or almost
+// same signatures as libc functions, but they all begin with c_ prefix
 
 INLINE u32 c_strlen(const char* str) {
 	u32 len = 0;
@@ -562,7 +606,7 @@ i32 c_memcmp(const void* ptr1, const void* ptr2, u32 size) {
 	return size == 0 ? 0 : *p1 - *p2;
 }
 
-INLINE i32 is_alphabet(char c) {
+INLINE i32 c_isalpha(char c) {
 	if (c >= 'a' && c <= 'z')
 		return TRUE;
 	if (c >= 'A' && c <= 'Z')
@@ -570,11 +614,20 @@ INLINE i32 is_alphabet(char c) {
 	return FALSE;
 }
 
-INLINE i32 is_space(char c) {
+/** Return 1 if given character is digit. 0 otherwise.
+ */
+INLINE i32 c_isdigit(char c) {
+	if (c >= '0' && c <= '9')
+		return 1;
+	return 0;
+}
+
+INLINE i32 c_isspace(char c) {
 	switch (c) {
 		case ' ':
 		case '\n':
 		case '\t':
+		case '\r':
 			return TRUE;
 		default:
 			return FALSE;
@@ -1575,6 +1628,36 @@ LOCAL i32 parser_find_next_char(const char* buf, u64 start_position, u64 count) 
 	return -1;
 }
 
+/** Allocate table of size 256, that has 1 on places representing valid values
+ * for symbols. 0 everywhere else
+ */
+LOCAL struct ExpressionT* _parser_alloc_symbol_tokens(struct context* ctx) {
+	struct ExpressionT* table = type_mem_alloc(ctx, 256);
+	i64 memset_result = type_mem_memset(table, 0, 256);
+	if (!table || memset_result)
+		return NULL;
+
+	char* ptr = type_mem_get_loc(table, 0);
+
+	for (u32 i = 'a'; i < 'z'; i++)
+		ptr[i] = 1;
+	for (u32 i = 'A'; i < 'Z'; i++)
+		ptr[i] = 1;
+	ptr['+'] = 1;
+	ptr['-'] = 1;
+	ptr['*'] = 1;
+	ptr['/'] = 1;
+	ptr['_'] = 1;
+	ptr['#'] = 1;
+	ptr['!'] = 1;
+	ptr['?'] = 1;
+	return table;
+}
+
+INLINE i32  _parser_is_symbol_token(unsigned char c, const char *tokens) {
+	return tokens[c] != 0;
+}
+
 /** Subparser for symbols (names)
  */
 Expression* parser_parse_symbol(
@@ -1582,14 +1665,22 @@ Expression* parser_parse_symbol(
 		u64 max_size,
 		/* out */ u64* num_processed,
 		struct context* ctx) {
+	// Check if we were called properly
+	if (global_get_stage_type(ctx) != STAGE_SYMBOL_TOKENS) {
+		global_set_error(ctx, ERROR_CRITICAL);
+		return NULL;
+	}
+	struct ExpressionT* symbol_table_mem = global_get_stage(ctx);
+	const char* symbol_table = type_mem_get_loc(symbol_table_mem, 0);
+
 	u32 symbol_size = 0;
 	for (; symbol_size < max_size; symbol_size++) {
-		if (is_alphabet(buf[symbol_size]))
-			continue;
 		if (buf[symbol_size] == 0 || buf[symbol_size] == ')')
 			break;
-		if (is_space(buf[symbol_size]))
+		if (c_isspace(buf[symbol_size]))
 			break;
+		if (_parser_is_symbol_token(buf[symbol_size], symbol_table))
+			continue;
 		DEBUG_ERROR("Invalid symbol");
 		return NULL;
 	}
@@ -1664,28 +1755,47 @@ Expression* parser_parse_string(
  */
 struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct context* ctx, u64* out_processed) {
 	struct ExpressionT* ret = NULL;
-	for (i64 i = 0; i < count || buf[i] != 0; i++) {
+	// First let's determine if this is top level parser method call - if
+	// it is, it must initialize symbol token table.
+	const u64 old_stage_type = global_get_stage_type(ctx);
+	void* old_stage_value = global_get_stage(ctx);
+	if (old_stage_type != STAGE_SYMBOL_TOKENS) {
+		void* symbol_token_table = _parser_alloc_symbol_tokens(ctx);
+		if (!symbol_token_table) {
+			global_set_error(ctx, ERROR_OOM);
+			goto bad;
+		}
+		global_set_stage(ctx, STAGE_SYMBOL_TOKENS, symbol_token_table);
+	}
+	// Now guaranteed to not be NULL
+	struct ExpressionT* symbol_tokens_expr = global_get_stage(ctx);
+	const char* symbol_tokens = type_mem_get_loc(symbol_tokens_expr, 0);
+	// MAIN LOOP
+	i64 i = parser_find_next_char(buf, 0, count);
+	if (i == -1) {
+		global_set_error(ctx, ERROR_PARSER);
+		goto bad;
+	}
+	for (; i < count || buf[i] != 0; i++) {
 		char c = buf[i];
 		if (c == '(') { // This will be new list
-			// int j = i+1;
 			ret = type_cons_alloc_stack(ctx);
 			if (!ret) {
 				DEBUG_ERROR("Memory fail - parser");
-				return NULL;
+				goto bad;
 			}
 
-
-			while (1) { // Load everythin inside expression
+			while (1) { // Load everything inside expression
 				i = parser_find_next_char(buf,i+1, count);
 				if (i < 0) {
 					// TODO: Free memory
 					DEBUG_ERROR("Cannot find closing brace");
-					return ret;
+					goto bad;
 				}
 				if (buf[i] == ')') { // Parsing finished
 					if (out_processed)
 						*out_processed = i+1;
-					return ret;
+					goto ret;
 				}
 
 				u64 skip = 0;
@@ -1693,7 +1803,7 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 					parser_parse_expression(buf+i, count - i, ctx, &skip);
 				if (!es) {
 					DEBUG_ERROR("Invalid expression");
-					return NULL;
+					goto bad;
 				}
 				i += skip - 1;
 
@@ -1701,11 +1811,13 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 				if (type_cons_car(ret) == NULL) {
 					type_cons_set_car(ret, es);
 				} else {
+					// Append to the end of current list
+					// new cons
 					struct ExpressionT* new_cons =
 						type_cons_alloc_stack(ctx);
 					if (!new_cons) {
 						DEBUG_ERROR("Cannot allocate cons");
-						return NULL;
+						goto bad;
 					}
 					type_cons_set_car(new_cons, es);
 					struct ExpressionT* curr = ret;
@@ -1716,7 +1828,7 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 				}
 			}
 			DEBUG_ERROR("Unclosed expression");
-			return NULL;
+			goto bad;
 		} else if (c == '"')  { // Parse string
 			u64 string_size = 0;
 			struct ExpressionT* es =
@@ -1727,9 +1839,15 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 			}
 			if (out_processed)
 				*out_processed =  string_size + i;
-			return es;
+			// TODO: Check what happens with ret old value
+			ret = es;
+			goto ret;
 		}
-		else if (is_alphabet(c)) { // Parse symbol
+		else if (c_isdigit(c)) {
+			DEBUG_ERROR("Numbers not implemented");
+			global_set_error_parser_char(ctx, &buf[i], count - i);
+		}
+		else if (_parser_is_symbol_token(c, symbol_tokens)) {
 			u64 string_size = 0;
 			struct ExpressionT* expr =
 				parser_parse_symbol(buf+i, count-i, &string_size, ctx);
@@ -1739,19 +1857,24 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 			}
 			if (out_processed)
 				*out_processed =  string_size + i;
-			return expr;
+			// TODO: Check what happens with ret old value
+			ret = expr;
+			goto ret;
 		}
 		else {
 			DEBUG_ERROR("Invalid character");
-
 			global_set_error_parser_char(ctx,
 					&buf[i > 2 ? i - 2 : i], count - i);
-
-			return NULL;
+			goto bad;
 		}
 	}
+bad:
+	ret = NULL; // TODO: Free memory
 	DEBUG_ERROR("Wrong");
-	return NULL;
+ret:
+	// TODO: Free table
+	global_set_stage(ctx, old_stage_type, old_stage_value);
+	return ret;
 }
 
 /** Main parser method, used to call parser from outside
