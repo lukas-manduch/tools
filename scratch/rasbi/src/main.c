@@ -1967,9 +1967,24 @@ int parser_ast_verify_let(struct ExpressionT* expr) {
 struct AstNode* parser_ast_build(struct context*, struct ExpressionT*);
 
 struct AstNode* parser_ast_build_let(struct context* ctx, struct ExpressionT* expr) {
-	struct AstNode* let_node = type_ast_alloc_var(ctx);
+	if (parser_ast_verify_let(expr)) {
+		global_set_error(ctx, ERROR_SYNTAX);
+		return NULL;
+	}
+	struct AstNode* let_node = type_ast_alloc_let(ctx);
 	if (!let_node) {
 		global_set_error(ctx, ERROR_STACK_ALLOC);
+		return NULL;
+	}
+	struct ExpressionT* var_decl = type_cons_car(type_cons_car(expr));
+	let_node->ast_let.name = type_cons_car(var_decl);
+	let_node->ast_let.initial_value = type_cons_car(type_cons_cdr(var_decl));
+
+	// TODO: Handle multiple functions as progn. Or don't, but in that case
+	// fix verifier for let sexp
+
+	let_node->ast_let.function = parser_ast_build(ctx, type_cons_car(type_cons_cdr(expr)));
+	if (!let_node->ast_let.function) {
 		return NULL;
 	}
 
@@ -2055,6 +2070,18 @@ struct AstNode* parser_ast_build_func(
 	return func_node;
 }
 
+/* Builder of absctract syntax tree.
+ *
+ * Ast build is second phase of parsing, which recognizes in parsed
+ * s-expressions important structures.  Structures like ifs gotos and variable
+ * declarations.
+ *
+ * This is top function, which then calls structure specific parsers.  These
+ * parsers are also usually split in two functions, verifier - which checks
+ * correct form and builder, which  acutally cretes AST structure.  This is
+ * done to keep functions simpler.
+ *
+ */
 struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) {
 	if (type_isstring(expr) || type_is_symbol(expr)) {
 		struct AstNode* ret = type_ast_alloc_value(ctx, expr);
@@ -2088,10 +2115,15 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 			return NULL;
 		}
 		return node;
-	// AST_VAR
+	// AST_LET
 	} else if (symbol_size == sizeof(keyword_let)
 			&& c_memcmp(keyword_let, symbol_str, sizeof(keyword_let)) == 0) {
-		//parser_ast_build_let();
+		struct AstNode* node = parser_ast_build_let(ctx, type_cons_cdr(expr));
+		if (!node) {
+			DEBUG_ERROR("Let is wrong");
+			return NULL;
+		}
+		return node;
 	// AST_FUNC
 	} else { // Just regular function call
 		 struct AstNode* node = parser_ast_build_func(ctx, expr);
@@ -2767,14 +2799,18 @@ void c_printf1(const char* format_string, void* arg1) {
 
 void debug_to_cstring(struct ExpressionT* src, char* dest, u32 max_size) {
 	c_memset(dest, 0, max_size);
-	if (!type_isstring(src)) {
+	if (type_isstring(src)) {
+		u32 str_size = type_string_get_length(src);
+		c_memcpy(dest,type_string_getp(src),
+				str_size > max_size? max_size : str_size);
+	} else if (type_is_symbol(src)) {
+		u32 symbol_size = type_symbol_get_size(src);
+		c_memcpy(dest, type_symbol_get_str(src),
+				max_size > symbol_size ? symbol_size : max_size);
+	} else {
 		if (max_size > 1)
 			*dest = '?';
-		return;
 	}
-	u32 str_size = type_string_get_length(src);
-	c_memcpy(dest,type_string_getp(src),
-			str_size > max_size? max_size : str_size);
 }
 
 void debug_print_error(struct context* ctx) {
@@ -2794,13 +2830,17 @@ void debug_print_error(struct context* ctx) {
 
 }
 
-void debug_print_ast(struct AstNode* ast, u32 depth) {
+void _debug_print_ast_space(u32 depth) {
 	for (u32 i = 0; i < depth; i++) {
 		c_printf0(" ");
 	}
+}
+
+void debug_print_ast(struct AstNode* ast, u32 depth) {
+	_debug_print_ast_space(depth);
 	if (!ast) {
 		c_printf0("NULL\n");
-	}else if (type_ast_isfunc(ast)) {
+	} else if (type_ast_isfunc(ast)) {
 		struct ExpressionT* fexpr = type_ast_func_expr(ast);
 		struct ExpressionT* fname = type_cons_car(fexpr);
 		const char* fname_str = type_symbol_get_str(fname);
@@ -2815,17 +2855,30 @@ void debug_print_ast(struct AstNode* ast, u32 depth) {
 			debug_print_ast(type_cons_car_ast(argument), depth+2);
 			argument = type_cons_cdr(argument);
 		}
-	}
-	else if (type_ast_isval(ast)) {
-		c_printf0("val: ");
+	} else if (type_ast_isval(ast)) {
 		char buffer[300];
 		debug_to_cstring(ast->ast_value.value, buffer, 300);
-		c_printf1("\"%s\"\n", buffer);
+
+		if (type_isstring(ast->ast_value.value)) {
+			c_printf1("str: \"%s\"\n", buffer);
+		} else {
+			c_printf1("val: %s\n", buffer);
+		}
 	} else if (type_ast_isif(ast)) {
 		c_printf0("IF\n");
 		debug_print_ast(ast->ast_if.condition, depth+2);
 		debug_print_ast(ast->ast_if.body_true, depth+2);
 		debug_print_ast(ast->ast_if.body_false, depth+2);
+	} else if (type_ast_islet(ast)) {
+		c_printf0("LET\n");
+		char buffer[100];
+		_debug_print_ast_space(depth+2);
+		debug_to_cstring(ast->ast_let.name, buffer, 100);
+		c_printf1("name: %s\n", buffer);
+		_debug_print_ast_space(depth+2);
+		debug_to_cstring(ast->ast_let.initial_value, buffer, 100);
+		c_printf1("value: %s\n", buffer);
+		debug_print_ast(ast->ast_let.function, depth+2);
 	}
 }
 
