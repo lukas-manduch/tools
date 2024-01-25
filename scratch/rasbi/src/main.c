@@ -69,6 +69,7 @@ enum ExpressionType {
 	MEMORY        = 1 << 4,
 	ASSOCA        = 1 << 5,
 	TYPE_STRING   = 1 << 6,
+	TYPE_ARRAY    = 1 << 7,
 };
 
 /* Stage types in struct context  */
@@ -739,7 +740,7 @@ void* c_bsearch(const void* key, const void* array,
 // ============================
 
 // ============================
-//   TYPES
+//   BEGIN  TYPES
 // ============================
 
 
@@ -878,6 +879,100 @@ i64 type_mem_memset(struct ExpressionT* expr, unsigned char value, u64 length) {
 	c_memset(expr->value_memory.mem, value, length);
 	return 0;
 }
+
+// ------ ARRAY ------
+
+struct TypeArrayHeader {
+	u32 taken;
+	u32 element_size;
+};
+_Static_assert(sizeof(struct TypeArrayHeader) == 8); // Must be 8 algined
+
+/** Return 1 if argument is of type array. 0 otherwise
+ */
+INLINE u32 type_isarray(struct ExpressionT* expr) {
+	if (expr && type_ismem(expr) && (expr->expr_type & TYPE_ARRAY)) {
+		return 1;
+	}
+	return 0;
+}
+
+/** Internal function */
+INLINE struct TypeArrayHeader* _type_array_get_header(struct ExpressionT* expr) {
+	return type_mem_get_loc(expr, 0);
+}
+
+/** Internal function */
+INLINE void* _type_array_get_start(struct ExpressionT* expr) {
+	return type_mem_get_loc(expr, sizeof(struct TypeArrayHeader));
+}
+
+/** Allocate array on heap memory.
+ *  Return pointer to array on success, NULL otherwise.
+ */
+struct ExpressionT* type_array_heapalloc(struct context* ctx, u32 elem_count, u32 elem_size) {
+	u32 actual_size = elem_count * elem_size + sizeof(struct TypeArrayHeader);
+	struct ExpressionT* result = type_mem_alloc(ctx, actual_size);
+	if (!result) {
+		return NULL;
+	}
+	type_mem_memset(result, 0, actual_size); // Guaranteed ok
+	result->expr_type |= TYPE_ARRAY;
+	struct TypeArrayHeader *header = _type_array_get_header(result);
+	header->taken = 0;
+	header->element_size = elem_size;
+	return result;
+}
+
+/** Return number of elements currently in array
+ *  On error returns 0
+ */
+u32 type_array_len(struct ExpressionT* expr) {
+	if (!type_isarray(expr)) {
+		return 0;
+	}
+	struct TypeArrayHeader *header = _type_array_get_header(expr);
+	return header->taken;
+}
+
+/** Return pointer to location of data on position INDEX
+ */
+void* type_array_get(struct ExpressionT* expr, u32 index) {
+	if (!type_isarray(expr)) {
+		return NULL;
+	}
+	struct TypeArrayHeader *header = _type_array_get_header(expr);
+	if (index > header->taken) {
+		return NULL;
+	}
+	unsigned char* data = _type_array_get_start(expr);
+	data += index * header->element_size;
+	return data;
+}
+
+
+/** Append element pointed to by DATA to the end of array.
+ *  Returns 0 if success
+ *  Returns 1 if memory is full
+ *  Size of element is determined by array settings
+ */
+i32 type_array_push_back(struct ExpressionT* expr, const void* data) {
+	if (!type_isarray(expr)) {
+		return 1;
+	}
+	struct TypeArrayHeader *header = _type_array_get_header(expr);
+	i64 max_size = type_mem_get_len(expr) - sizeof(struct TypeArrayHeader);
+	i64 requested_size = (header->taken + 1) * header->element_size;
+	if (requested_size > max_size) {
+		return 1;
+	}
+	// Now we know, that element will fit
+	header->taken++;
+	void* location = type_array_get(expr, header->taken - 1);
+	c_memcpy(location, data, header->element_size);
+	return 0;
+}
+
 
 // ------ STRING ------
 

@@ -138,8 +138,35 @@ void run_test_types_assoca() {
 	test_assoca_pack();
 }
 
+static void run_test_types_array() {
+	struct context _ctx;
+	struct context *ctx = &_ctx;
+	init_context(ctx);
+
+	const char* element1 = "12345";
+	const char* element2 = "67890";
+	const char* element3 = "abcde";
+
+	struct ExpressionT* array = type_array_heapalloc(ctx, 3, 4);
+	TEST_ASSERT(type_isarray(array));
+
+	TEST_ASSERT(type_array_push_back(array, element1) == 0);
+	TEST_ASSERT(type_array_push_back(array, element2) == 0);
+	TEST_ASSERT(type_array_push_back(array, element3) == 0);
+	TEST_ASSERT(type_array_push_back(array, element1) == 1);
+
+	void* data1 = type_array_get(array, 0);
+	void* data2 = type_array_get(array, 1);
+	void* data3 = type_array_get(array, 2);
+
+	TEST_ASSERT(c_memcmp(data1, element1, 4) == 0);
+	TEST_ASSERT(c_memcmp(data2, element2, 4) == 0);
+	TEST_ASSERT(c_memcmp(data3, element3, 4) == 0);
+}
+
 void run_tests_types() {
 	run_test_types_mem();
 	run_test_types_varchar();
 	run_test_types_assoca();
+	run_test_types_array();
 }

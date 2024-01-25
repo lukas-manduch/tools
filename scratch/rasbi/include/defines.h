@@ -2,6 +2,7 @@
 
 #define DEBUG 1
 #define LOCAL static
+#define STATIC static
 #define INLINE static inline
 #define NULL 0
 #define FALSE 0
