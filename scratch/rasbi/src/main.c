@@ -70,6 +70,7 @@ enum ExpressionType {
 	ASSOCA        = 1 << 5,
 	TYPE_STRING   = 1 << 6,
 	TYPE_ARRAY    = 1 << 7,
+	TYPE_NUMBER   = 1 << 8,
 };
 
 /* Stage types in struct context  */
@@ -80,16 +81,19 @@ enum StageType {
 
 /* Error codes in struct context */
 enum ErrorCodes {
-	ERROR_SUCCESS        = 0, // No error. Placeholder to protect 0
-	ERROR_GENERAL        = 1,
-	ERROR_ARGUMENT       = 2,
-	ERROR_STACK_ALLOC    = 3,
-	ERROR_OOM            = 4,
-	ERROR_SYNTAX         = 5,
-	ERROR_BUFFER_SIZE    = 6,
-	ERROR_CRITICAL       = 7,
-	ERROR_PARSER         = 16,
-	ERROR_PARSER_CHAR    = 17,
+	ERROR_SUCCESS         = 0, // No error. Placeholder to protect 0
+	ERROR_GENERAL         = 1,
+	ERROR_ARGUMENT        = 2,
+	ERROR_STACK_ALLOC     = 3, // Unused
+	ERROR_OOM             = 4,
+	ERROR_SYNTAX          = 5,
+	ERROR_BUFFER_SIZE     = 6,
+	ERROR_CRITICAL        = 7,
+	ERROR_PARSER          = 16,
+	ERROR_PARSER_OOM      = 17, // Used by both parser and ast_builder
+	ERROR_PARSER_CHAR     = 18,
+	ERROR_AST_EXPRESSION  = 32,
+	ERROR_AST_UNSUPPORTED = 33,
 };
 
 struct StringExpression {
@@ -120,6 +124,7 @@ typedef struct ExpressionT {
 		struct _consExpression value_cons;
 		struct _memoryExpression value_memory;
 		struct StringExpression value_symbol; // Symbols are strings
+		i64 value_number;
 	};
 } Expression;
 
@@ -476,6 +481,14 @@ INLINE void global_set_error(struct context* ctx, enum ErrorCodes code) {
 	ctx->error_code = code;
 }
 
+INLINE void global_set_error_parser_oom(struct context* ctx) {
+	global_set_error(ctx, ERROR_PARSER_OOM);
+}
+
+INLINE void global_set_error_oom(struct context* ctx) {
+	global_set_error(ctx, ERROR_OOM);
+}
+
 void global_error_syntax(struct context* ctx, struct ExpressionT* _e) {
 	if (global_is_error(ctx))
 		return;
@@ -483,7 +496,7 @@ void global_error_syntax(struct context* ctx, struct ExpressionT* _e) {
 	_e = _e; // unused for now
 }
 
-INLINE void global_set_error_parser_char(struct context* ctx, const char* ptr, u32 length) {
+STATIC void global_set_error_parser_char(struct context* ctx, const char* ptr, u32 length) {
 	if (global_is_error(ctx))
 		return;
 
@@ -501,10 +514,14 @@ INLINE u64 global_get_error(struct context* ctx) {
 	return 0;
 }
 
-void global_format_error(struct context* ctx, char* buffer, u32 max_size) {
-#ifndef REPL
-	const char err_format[] = { 'E' , ':', ' ', '%', 'd', ' ', '%', 's' };
-#endif
+/** Format global error to buffer.
+ *  Returns 0 on success.
+ *  Returns non-zero on failure
+ */
+i32 global_format_error(struct context* ctx, char* buffer, u32 max_size) {
+	[[maybe_unused]]const char err_format[] =
+		{ 'E' , ':', ' ', '%', 'd', ' ', '%', 's' };
+	const char err_format_number[] = { 'E' , ':', ' ', '%', 'd'};
 	u64 params[2];
 	u64 error_code = global_get_error(ctx);
 
@@ -776,6 +793,47 @@ INLINE u32 type_symbol_get_size(struct ExpressionT* expr) {
 		return expr->value_symbol.size;
 	}
 	return 0;
+}
+
+// ------ NUMBER -------
+
+// Type representing non floating numbers. Base is 64 bit signed integer
+
+/** Check if argument is of type number.
+ *  Return 1 if type is number
+ *  Return 0 if type is not number
+ */
+INLINE u32 type_isnumber(struct ExpressionT* expr) {
+	if (expr && expr->expr_type == TYPE_NUMBER) {
+		return 1;
+	}
+	return 0;
+}
+
+/** Allocate number on stack
+ */
+struct ExpressionT* type_number_alloc_stack(struct context* ctx) {
+	struct ExpressionT* expr =
+		stack_push_aligned(ctx, sizeof(struct ExpressionT));
+	if (expr == NULL) {
+		return NULL;
+	}
+	expr->expr_type = TYPE_NUMBER;
+	expr->value_number = 0;
+	return expr;
+}
+
+i64 type_number_get_value(struct ExpressionT* expr) {
+	if (!type_isnumber(expr)) {
+		return NULL;
+	}
+	return expr->value_number;
+}
+
+void type_number_set_value(struct ExpressionT* expr, i64 value) {
+	if (!type_isnumber(expr))
+		return;
+	expr->value_number = value;
 }
 
 // ------ MEMORY -------
@@ -1711,6 +1769,7 @@ struct ExpressionT* alloc_symbol(struct context* ctx, u64 length) {
 // ============================
 
 LOCAL i32 parser_find_next_char(const char* buf, u64 start_position, u64 count) {
+	// TODO: Maybe this shoul error on finding 0 - eof
 	i32 inside_comment = 0;
 	for (u64 i = start_position; i < count; i++) {
 		if (inside_comment) {
@@ -1801,11 +1860,65 @@ Expression* parser_parse_symbol(
 	return ret;
 }
 
+struct ExpressionT* parser_parse_number(const char* buf, u64 max_size,
+		/* out */ u64* num_processed, struct context* ctx) {
+	// First check syntax and count digits
+	u64 character_count = 0;
+	i32 has_minus = 0;
+	for (; character_count < max_size; character_count++) {
+		if (c_isdigit(buf[character_count])) {
+			continue;
+		}
+		if (c_isspace(buf[character_count]) || buf[character_count] == ')') {
+			// This is ok finish for us
+			break;
+		}
+		if (character_count == 0 && buf[character_count] == '-') {
+			has_minus = 1;
+			continue;
+		}
+		// There is unexpected character. Format error
+		character_count = character_count  > 2 ? character_count - 2 : 0;
+		global_set_error_parser_char(ctx, &buf[character_count],
+				max_size - character_count);
+		return NULL;
+	}
+
+	// Failsafe
+	if (character_count == 0 || (character_count == 1 && has_minus)) {
+		global_set_error_parser_char(ctx, &buf[0], max_size);
+		return NULL;
+	}
+
+	struct ExpressionT* result = type_number_alloc_stack(ctx);
+
+	// --------------------------------------------------------------------
+	// Everything is ok. Nowhere to fail from now
+	if (num_processed)
+		*num_processed = character_count;
+
+	if (has_minus) {
+		character_count--;
+		buf++;
+	}
+
+	i64 final_number = 0;
+	i64 multiplier = 1;
+	for (u64 i = 0; i < character_count; i++, multiplier *= 10) {
+		i64 digit = buf[character_count - i - 1] - '0';
+		final_number += digit*multiplier;
+	}
+	if (has_minus)
+		final_number *= -1;
+	type_number_set_value(result, final_number);
+	return result;
+}
+
 /** Subparser for strings
  *
  * In future it should support constructs like \n and \"
  */
-Expression* parser_parse_string(
+struct ExpressionT* parser_parse_string(
 		const char* buf,
 		u64 max_size,
 		/* out */ u64* num_processed,
@@ -1868,7 +1981,7 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 	if (old_stage_type != STAGE_SYMBOL_TOKENS) {
 		void* symbol_token_table = _parser_alloc_symbol_tokens(ctx);
 		if (!symbol_token_table) {
-			global_set_error(ctx, ERROR_OOM);
+			global_set_error_parser_oom(ctx);
 			goto bad;
 		}
 		global_set_stage(ctx, STAGE_SYMBOL_TOKENS, symbol_token_table);
@@ -1950,6 +2063,7 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 			goto ret;
 		}
 		else if (c_isdigit(c)) { // Parse integer
+			// TODO: Handle negative numbers
 			DEBUG_ERROR("Numbers not implemented");
 			global_set_error_parser_char(ctx, &buf[i], count - i);
 		}
@@ -2068,7 +2182,7 @@ struct AstNode* parser_ast_build_let(struct context* ctx, struct ExpressionT* ex
 	}
 	struct AstNode* let_node = type_ast_alloc_let(ctx);
 	if (!let_node) {
-		global_set_error(ctx, ERROR_STACK_ALLOC);
+		global_set_error_parser_oom(ctx);
 		return NULL;
 	}
 	struct ExpressionT* var_decl = type_cons_car(type_cons_car(expr));
@@ -2138,7 +2252,7 @@ struct AstNode* parser_ast_build_func(
 
 	struct AstNode* func_node = type_ast_alloc_func(ctx, expr);
 	if (!func_node) {
-		global_set_error(ctx, ERROR_STACK_ALLOC);
+		global_set_error_parser_oom(ctx);
 		return NULL;
 	}
 	func_node->ast_func.name = type_cons_car(expr);
@@ -2181,7 +2295,7 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 	if (type_isstring(expr) || type_is_symbol(expr)) {
 		struct AstNode* ret = type_ast_alloc_value(ctx, expr);
 		if (!ret) {
-			global_set_error(ctx, ERROR_STACK_ALLOC);
+			global_set_error_parser_oom(ctx);
 			return NULL;
 		}
 		return ret;
