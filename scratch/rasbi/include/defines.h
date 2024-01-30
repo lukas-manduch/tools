@@ -19,7 +19,11 @@
 #define CONST_ERROR_PARSER_BUFFER_SIZE 10
 
 #if DEBUG == 1
+
+#ifndef NOTEST
 #define TEST
+#endif
+
 // If ran like repl, there is also .data and .rodata and we have strings
 #define REPL
 #endif

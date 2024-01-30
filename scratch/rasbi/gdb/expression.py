@@ -18,6 +18,8 @@ class ExpressionPrinter():
             content = self._symbol_str()
         if expr_type == "TYPE_STRING":
             content = self._string_str()
+        if expr_type == "TYPE_NUMBER":
+            content = self._string_num()
         return expr_type + "\n" + content
 
     def display_hint(self):
@@ -72,6 +74,10 @@ class ExpressionPrinter():
         result += "'"
         return result
 
+    def _string_num(self):
+        """Print TYPE_NUMBER"""
+        value = self.value["value_number"]
+        return str(value)
 
 class ExpressionPrinterHook(gdb.printing.PrettyPrinter):
 
