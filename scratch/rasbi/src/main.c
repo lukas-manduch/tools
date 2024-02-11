@@ -152,6 +152,7 @@ enum AstSymbol {
 	AST_FUNC,
 	AST_VALUE,
 	AST_LET,
+	AST_PROGN,
 	//AST_TAG,
 };
 
@@ -564,11 +565,25 @@ i32 global_format_error(struct context* ctx, char* buffer, u32 max_size) {
 
 	params[0] = error_code;
 
-	if (ctx->error_code == ERROR_PARSER_CHAR) {
-		params[1] = (u64)(ctx->error_context.parser_character_error.text);
-		runtime_format(
-			FORMAT_STRING(err_format, "E: %d, parser error near: %s"),
-			buffer, max_size, params);
+	switch (ctx->error_code) {
+		case 0:
+			if (max_size > 2) {
+				buffer[0] = 'o';
+				buffer[1] = 'k';
+				buffer[2] = 0;
+			}
+			return 0;
+		case ERROR_PARSER_CHAR:
+			params[1] = (u64)(ctx->error_context.parser_character_error.text);
+			return runtime_format(
+					FORMAT_STRING(err_format, "E: %d, parser error near: %s"),
+					buffer, max_size, params) < 0;
+		case ERROR_AST_EXPRESSION:
+			return runtime_format(err_format_number, buffer,
+					max_size, params) < 0;
+			// TODO: This should be nicer
+		default:
+			return _global_format_error_wrapper(err_format_number, buffer, max_size, params);
 	}
 }
 
@@ -1764,11 +1779,32 @@ INLINE struct AstNode* type_ast_alloc_let(struct context* ctx) {
 		return NULL;
 	}
 	node->type = AST_LET;
+	node->ast_let.name = NULL;
+	node->ast_let.initial_value = NULL;
+	node->ast_let.function = NULL;
 	return node;
 }
 
 INLINE u32 type_ast_islet(struct AstNode* node) {
 	return type_ast_is(node, AST_LET);
+}
+
+// AST_PROGN
+INLINE struct AstNode* type_ast_alloc_progn(struct context* ctx) {
+	struct AstNode* node = _type_ast_alloc_stack(ctx);
+	if (!node) {
+		return NULL;
+	}
+	node->type = AST_PROGN;
+	node->ast_progn.functions = NULL;
+	return node;
+}
+
+/** Return 1 if type is AST_PROGN
+ *  0 otherwise
+ */
+INLINE i32 type_ast_isprogn(struct AstNode* node) {
+	return type_ast_is(node, AST_PROGN);
 }
 
 
@@ -2108,7 +2144,7 @@ struct ExpressionT* parser_parse_expression(const char* buf, u32 count, struct c
 		else if (c_isdigit(c) ||  // Digit or minus AND digit
 				(c == '-' && (i+1) < count && c_isdigit(buf[i+1]))) { // Parse integer
 			u64 number_length = 0;
-			struct ExpressionT* number = 
+			struct ExpressionT* number =
 				parser_parse_number(&buf[i], count - i, &number_length, ctx);
 			if (!number) {
 				// Error is set by parser_parse_number
@@ -2342,6 +2378,87 @@ struct AstNode* parser_ast_build_func(
 	return func_node;
 }
 
+struct ExpressionT* _parser_ast_build_progn_internal(struct context* ctx, struct ExpressionT* expr, u32 num_expressions) {
+	struct ExpressionT* array_ptr =
+		type_array_heapalloc(ctx, num_expressions, sizeof(void*));
+	if (!array_ptr) {
+		global_set_error_parser_oom(ctx);
+		return NULL;
+	}
+	for (u32 i = 0; i < num_expressions; i++) {
+		struct ExpressionT* line = type_cons_car(expr);
+		// TODO: This should be parsed here
+		if (!line) {
+			global_set_error_ast(ctx, expr);
+			return NULL;
+		}
+		struct AstNode* parsed_node = parser_ast_build(ctx, line);
+		if (!parsed_node) { // Error is set by parser_ast_build
+			return NULL;
+		}
+		type_array_push_back(array_ptr, &parsed_node);
+		expr = type_cons_cdr(expr);
+	}
+	return array_ptr;
+}
+
+/** Build Ast for progn, given pointer to first element after "progn".
+ *  Currently progn is supported only in form where all members are
+ *  s-expressions, and there must be at least one.
+ *  Minimal progn:
+ *  (progn
+ *    (f-call))
+ */
+struct AstNode* parser_ast_build_progn(struct context* ctx, struct ExpressionT* expr) {
+	if (!type_iscons(expr)) {
+		global_set_error_ast(ctx, expr);
+		return NULL;
+	}
+
+        // First count number of s-exps in body, so we can allocate big enough
+        // array
+	u32 num_expressions = 0;
+	struct ExpressionT* tmp_expr = expr;
+	while (1) {
+		if (!type_iscons(tmp_expr)) {
+			if (tmp_expr == NULL) {
+				// We are at the end
+				break;
+			} else {
+				global_set_error_ast(ctx, tmp_expr);
+			}
+		}
+		// Now check if progn line is another s-exp. If not, it is
+		// probably just value, and it is error
+		if (!type_iscons(type_cons_car(tmp_expr))) {
+			global_set_error_unsupported_ast(ctx, tmp_expr);
+			return NULL;
+		}
+		tmp_expr = type_cons_cdr(tmp_expr);
+		num_expressions++;
+	}
+
+	// Progn must have at least one member
+	if (num_expressions == 0) {
+		global_set_error_unsupported_ast(ctx, expr);
+		return NULL;
+	}
+	// Now call function that builds array
+	struct ExpressionT* functions_array =
+		_parser_ast_build_progn_internal(ctx, expr, num_expressions);
+	if (!functions_array) {
+		// Error will be set by _parser_ast_build_progn_internal
+		return NULL;
+	}
+	struct AstNode* result = type_ast_alloc_progn(ctx);
+	if (!result) {
+		global_set_error_parser_oom(ctx);
+		return NULL;
+	}
+	result->ast_progn.functions = functions_array;
+	return result;
+}
+
 /* Builder of absctract syntax tree.
  *
  * Ast build is second phase of parsing, which recognizes in parsed
@@ -2375,6 +2492,7 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 	const char* symbol_str = type_symbol_get_str(t);
 	const char keyword_if[] = {'i', 'f'};
 	const char keyword_let[] = {'l', 'e', 't'};
+	const char keyword_progn[] = {'p', 'r', 'o', 'g', 'n'};
 
 
 	// AST_IF
@@ -2396,7 +2514,15 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 			return NULL;
 		}
 		return node;
-	// AST_FUNC
+	// AST_PROGN
+	} else if (symbol_size == sizeof(keyword_progn)
+			&& c_memcmp(keyword_progn, symbol_str, sizeof(keyword_progn)) == 0) {
+		struct AstNode* node = parser_ast_build_progn(ctx, type_cons_cdr(expr));
+		if (!node) {
+			// parser_ast_build_progn sets error
+			return NULL;
+		}
+		return node;
 	} else { // Just regular function call
 		 struct AstNode* node = parser_ast_build_func(ctx, expr);
 		 if (!node) {
@@ -3153,6 +3279,15 @@ void debug_print_ast(struct AstNode* ast, u32 depth) {
 		debug_to_cstring(ast->ast_let.initial_value, buffer, 100);
 		c_printf1("value: %s\n", buffer);
 		debug_print_ast(ast->ast_let.function, depth+2);
+	} else if (type_ast_isprogn(ast)) {
+		c_printf0("PROGN\n");
+		for (i32 i = 0, array_len = type_array_len(
+					ast->ast_progn.functions);
+				i < array_len; i++) {
+			debug_print_ast(*((struct AstNode**)
+						type_array_get(ast->ast_progn.functions, i)),
+					depth+2);
+		}
 	}
 }
 
