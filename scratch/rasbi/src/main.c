@@ -153,6 +153,7 @@ enum AstSymbol {
 	AST_VALUE,
 	AST_LET,
 	AST_PROGN,
+	AST_GOTO,
 	//AST_TAG,
 };
 
@@ -196,6 +197,11 @@ struct AstNode {
 			 // structures
 			struct ExpressionT* functions;
 		} ast_progn;
+
+		// AST_GOTO
+		struct {
+			struct ExpressionT* symbol;
+		} ast_goto;
 	};
 };
 
@@ -1807,6 +1813,29 @@ INLINE i32 type_ast_isprogn(struct AstNode* node) {
 	return type_ast_is(node, AST_PROGN);
 }
 
+// AST_GOTO
+
+/** Return 1 if type is AST_GOTO
+ *  0 otherwise
+ */
+INLINE i32 type_ast_isgoto(struct AstNode* node) {
+	return type_ast_is(node, AST_GOTO);
+}
+
+/** Allocate ast goto structure on stack and return pointer
+ */
+struct AstNode* type_ast_alloc_goto(struct context* ctx, struct ExpressionT* symbol) {
+	if (!type_is_symbol(symbol)) {
+		return NULL;
+	}
+	struct AstNode* node = _type_ast_alloc_stack(ctx);
+	if (!node) {
+		return NULL;
+	}
+	node->type = AST_GOTO;
+	node->ast_goto.symbol = symbol;
+	return node;
+}
 
 // ============================
 //   END TYPES
@@ -2269,6 +2298,23 @@ int parser_ast_verify_let(struct ExpressionT* expr) {
 
 struct AstNode* parser_ast_build(struct context*, struct ExpressionT*);
 
+/** Verify and build AST structure for goto expression.
+ */
+struct AstNode* parser_ast_build_goto(struct context* ctx, struct ExpressionT* expr) {
+	struct ExpressionT* symbol = type_cons_car(expr);
+	if (!type_iscons(expr) || type_cons_cdr(expr) || !type_is_symbol(symbol)) {
+		global_set_error_ast(ctx, expr);
+		return NULL;
+	}
+	// Now syntax is good
+	struct AstNode* symbol_node = type_ast_alloc_goto(ctx, symbol);
+	if (!symbol_node) {
+		global_set_error_parser_oom(ctx);
+		return NULL;
+	}
+	return symbol_node;
+}
+
 struct AstNode* parser_ast_build_let(struct context* ctx, struct ExpressionT* expr) {
 	if (parser_ast_verify_let(expr)) {
 		global_set_error(ctx, ERROR_SYNTAX);
@@ -2490,9 +2536,11 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 	}
 	u32 symbol_size = type_symbol_get_size(t);
 	const char* symbol_str = type_symbol_get_str(t);
+
 	const char keyword_if[] = {'i', 'f'};
 	const char keyword_let[] = {'l', 'e', 't'};
 	const char keyword_progn[] = {'p', 'r', 'o', 'g', 'n'};
+	const char keyword_goto[] = {'g', 'o', 't', 'o'};
 
 
 	// AST_IF
@@ -2520,6 +2568,15 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 		struct AstNode* node = parser_ast_build_progn(ctx, type_cons_cdr(expr));
 		if (!node) {
 			// parser_ast_build_progn sets error
+			return NULL;
+		}
+		return node;
+	// AST_GOTO
+	} else if (symbol_size == sizeof(keyword_goto)
+			&& c_memcmp(keyword_goto, symbol_str, sizeof(keyword_goto)) == 0) {
+		struct AstNode* node = parser_ast_build_goto(ctx, type_cons_cdr(expr));
+		if (!node) {
+			// parser_ast_build_goto sets error
 			return NULL;
 		}
 		return node;
@@ -3288,6 +3345,15 @@ void debug_print_ast(struct AstNode* ast, u32 depth) {
 						type_array_get(ast->ast_progn.functions, i)),
 					depth+2);
 		}
+	} else if (type_ast_isgoto(ast)) {
+		char buffer[100];
+		struct ExpressionT* symbol = ast->ast_goto.symbol;
+		u32 symbol_size = type_symbol_get_size(symbol);
+		const char* symbol_str = type_symbol_get_str(symbol);
+		u32 max_len = lib_min2_u32(symbol_size, 99);
+		c_memcpy(buffer, symbol_str, max_len);
+		buffer[max_len] = 0;
+		c_printf1("GOTO %s\n", buffer);
 	}
 }
 
