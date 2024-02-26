@@ -81,19 +81,23 @@ enum StageType {
 
 /* Error codes in struct context */
 enum ErrorCodes {
-	ERROR_SUCCESS         = 0, // No error. Placeholder to protect 0
-	ERROR_GENERAL         = 1,
-	ERROR_ARGUMENT        = 2,
-	ERROR_STACK_ALLOC     = 3, // Unused
-	ERROR_OOM             = 4,
-	ERROR_SYNTAX          = 5,
-	ERROR_BUFFER_SIZE     = 6,
-	ERROR_CRITICAL        = 7,
-	ERROR_PARSER          = 16,
-	ERROR_PARSER_OOM      = 17, // Used by both parser and ast_builder
-	ERROR_PARSER_CHAR     = 18,
-	ERROR_AST_EXPRESSION  = 32,
-	ERROR_AST_UNSUPPORTED = 33,
+	ERROR_SUCCESS           = 0, // No error. Placeholder to protect 0
+	ERROR_GENERAL           = 1,
+	ERROR_ARGUMENT          = 2,
+	ERROR_STACK_ALLOC       = 3, // Unused
+	ERROR_OOM               = 4,
+	ERROR_SYNTAX            = 5,
+	ERROR_BUFFER_SIZE       = 6,
+	ERROR_CRITICAL          = 7,
+
+	ERROR_PARSER            = 16,
+	ERROR_PARSER_OOM        = 17, // Used by both parser and ast_builder
+	ERROR_PARSER_CHAR       = 18,
+
+	ERROR_AST_EXPRESSION    = 32,
+	ERROR_AST_UNSUPPORTED   = 33,
+	ERROR_AST_SYMBOL_LONG   = 34,
+	ERROR_AST_CRITICAL      = 35, // Error in implementation / logic
 };
 
 struct StringExpression {
@@ -208,7 +212,7 @@ struct AstNode {
 struct ErrorContext {
 	union {
 		struct {
-			struct ExpressionT* expression;
+			const struct ExpressionT* expression;
 		} parser_ast_error;
 
 		// Parser didn't expect this character
@@ -528,11 +532,19 @@ STATIC void global_set_error_parser_char(struct context* ctx, const char* ptr, u
 	}
 }
 
-STATIC void global_set_error_ast(struct context* ctx, struct ExpressionT* ptr) {
+STATIC void global_set_error_ast(struct context* ctx, const struct ExpressionT* ptr) {
 	if (global_is_error(ctx)) {
 		return;
 	}
 	global_set_error(ctx, ERROR_AST_EXPRESSION);
+	ctx->error_context.parser_ast_error.expression = ptr;
+}
+
+STATIC void global_set_error_symbol_long(struct context* ctx, struct ExpressionT* ptr) {
+	if (global_is_error(ctx)) {
+		return;
+	}
+	global_set_error(ctx, ERROR_AST_SYMBOL_LONG);
 	ctx->error_context.parser_ast_error.expression = ptr;
 }
 
@@ -542,6 +554,10 @@ STATIC void global_set_error_unsupported_ast(struct context* ctx, struct Express
 	}
 	global_set_error(ctx, ERROR_AST_UNSUPPORTED);
 	ctx->error_context.parser_ast_error.expression = ptr;
+}
+
+INLINE void global_set_error_ast_critical(struct context* ctx) {
+	global_set_error(ctx, ERROR_AST_CRITICAL);
 }
 
 INLINE u64 global_get_error(struct context* ctx) {
@@ -585,6 +601,8 @@ i32 global_format_error(struct context* ctx, char* buffer, u32 max_size) {
 					FORMAT_STRING(err_format, "E: %d, parser error near: %s"),
 					buffer, max_size, params) < 0;
 		case ERROR_AST_EXPRESSION:
+		case ERROR_AST_UNSUPPORTED:
+		case ERROR_AST_SYMBOL_LONG:
 			return runtime_format(err_format_number, buffer,
 					max_size, params) < 0;
 			// TODO: This should be nicer
@@ -914,12 +932,16 @@ INLINE u32 type_ismem(struct ExpressionT* expr) {
 	return FALSE;
 }
 
-/** Allocate chunk of memory on heap.
- * Return pointer to new entry, or NULL on error.
+/** Internal function, check documentation of type_mem_alloc
  */
-struct ExpressionT* type_mem_alloc(struct context* ctx, u32 size) {
-	struct ExpressionT* new_expr  =
-		heap_alloc(ctx, sizeof(struct ExpressionT) + size);
+struct ExpressionT* _type_mem_alloc(struct context* ctx, u32 size, int alloc_on_stack) {
+	struct ExpressionT* new_expr;
+	if (!alloc_on_stack) { // Alloc heap
+		new_expr = heap_alloc(ctx, sizeof(struct ExpressionT) + size);
+	} else { // Alloc stack
+		new_expr = stack_push_aligned(ctx,
+				sizeof(struct ExpressionT) + size);
+	}
 	if (new_expr == NULL) {
 		DEBUG_ERROR("Cannot allocate memory chunk.");
 		return NULL;
@@ -928,6 +950,22 @@ struct ExpressionT* type_mem_alloc(struct context* ctx, u32 size) {
 	new_expr->value_memory.size = size;
 	new_expr->value_memory.taken = 0;
 	return new_expr;
+}
+
+/** Allocate chunk of memory on heap.
+ *  Return pointer to new entry
+ *  Return NULL on error
+ */
+INLINE struct ExpressionT* type_mem_alloc(struct context* ctx, u32 size) {
+	return _type_mem_alloc(ctx, size, 0);
+}
+
+/** Allocate memory on stack.
+ *  Return pointer to ExpressionT on success
+ *  Return NULL on errro
+ */
+INLINE struct ExpressionT* type_mem_alloc_stack(struct context* ctx, u32 size) {
+	return _type_mem_alloc(ctx, size, 1);
 }
 
 /** Get arbitrary location from mem chunk as pointer.
@@ -1230,7 +1268,7 @@ void type_varchar_create(void* dest, const char* source, u64 source_length) {
 u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size);
 u32 type_assoca_copy(struct ExpressionT* dest, struct ExpressionT* src);
 u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 value);
-struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count);
+INLINE struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count);
 
 /* Standard usage should be to allocate expected size of array (given in
  * expected number of keys). Then insert values until inserts starts failing.
@@ -1299,7 +1337,7 @@ u64 _type_assoca_header_insert(struct AssocaHeader* header, u64 value) {
  *
  * Returns pointer on success and NULL on failure (allocation fail)
  */
-struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count) {
+struct ExpressionT* _type_assoca_alloc(struct context* ctx, u32 count, int alloc_on_stack) {
 	// Size to fit approximately count english words
 	u32 request_size = round8(sizeof(struct AssocaHeader))
 		+ count*sizeof(u64)  // Entries in AssocaHeader
@@ -1307,7 +1345,12 @@ struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count) {
 		+ count*sizeof(void*) // Average length of word (my estimate)
 		+ count*round8(sizeof(struct Varchar));
 	request_size = round8(request_size);
-	struct ExpressionT* result = type_mem_alloc(ctx, request_size);
+	struct ExpressionT* result;
+	if (alloc_on_stack) {
+		result = type_mem_alloc_stack(ctx, request_size);
+	} else {
+		result = type_mem_alloc(ctx, request_size);
+	}
 	if (!result) {
 		DEBUG_ERROR("cannot allocate assoca");
 		return NULL;
@@ -1318,6 +1361,20 @@ struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count) {
 	header->entry_max = count;
 	header->entry_count = 0;
 	return result;
+}
+
+/** Allocate associative array on stack. For details check documentation of
+ *  function _type_assoca_alloc
+ */
+INLINE struct ExpressionT* type_assoca_alloc_stack(struct context* ctx, u32 count) {
+	return _type_assoca_alloc(ctx, count, 1);
+}
+
+/** Allocate associative array on heap. For details check documentation of
+ *  function _type_assoca_alloc
+ */
+INLINE struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count) {
+	return _type_assoca_alloc(ctx, count, 0);
 }
 
 /** Get pointer with largest address
@@ -1655,7 +1712,7 @@ struct ExpressionT* type_cons_alloc_stack(struct context* ctx) {
 /* Check if expression if of type CONS.
  * Returns TRUE or FALSE
  */
-u32 type_iscons(struct ExpressionT* expr) {
+u32 type_iscons(const struct ExpressionT* expr) {
 	if(expr && expr->expr_type == TYPE_CONS) {
 		return TRUE;
 	}
@@ -1665,7 +1722,7 @@ u32 type_iscons(struct ExpressionT* expr) {
 /* Get/Set CAR/CDR of expr.
  * On get error returns NULL.
  */
-INLINE struct ExpressionT* type_cons_car(struct ExpressionT* cons) {
+INLINE struct ExpressionT* type_cons_car(const struct ExpressionT* cons) {
 	if (type_iscons(cons)) {
 		return (struct ExpressionT*)cons->value_cons.car;
 	}
@@ -1685,7 +1742,7 @@ INLINE void type_cons_set_car(struct ExpressionT* cons, void* car) {
 	}
 }
 
-INLINE struct ExpressionT* type_cons_cdr(struct ExpressionT* cons) {
+INLINE struct ExpressionT* type_cons_cdr(const struct ExpressionT* cons) {
 	if (type_iscons(cons)) {
 		return (struct ExpressionT*)cons->value_cons.cdr;
 	}
@@ -1796,6 +1853,7 @@ INLINE u32 type_ast_islet(struct AstNode* node) {
 }
 
 // AST_PROGN
+
 INLINE struct AstNode* type_ast_alloc_progn(struct context* ctx) {
 	struct AstNode* node = _type_ast_alloc_stack(ctx);
 	if (!node) {
@@ -2232,7 +2290,7 @@ int parse_program(struct context* ctx, const char* buf, u64 size) {
 /** Check that 'if' syntax looks ok.
  * Return 0 on success or 1 on failure
  */
-int parser_ast_verify_if(struct context* ctx, struct ExpressionT* expr) {
+STATIC int parser_ast_verify_if(struct context* ctx, struct ExpressionT* expr) {
 	if (!type_iscons(expr)) {
 		global_set_error(ctx, ERROR_PARSER);
 		return 1;
@@ -2263,7 +2321,7 @@ int parser_ast_verify_if(struct context* ctx, struct ExpressionT* expr) {
 	return 0;
 }
 
-int parser_ast_verify_let(struct ExpressionT* expr) {
+STATIC int parser_ast_verify_let(struct ExpressionT* expr) {
 	if (!type_iscons(expr)) {
 		return 1;
 	}
@@ -2300,7 +2358,7 @@ struct AstNode* parser_ast_build(struct context*, struct ExpressionT*);
 
 /** Verify and build AST structure for goto expression.
  */
-struct AstNode* parser_ast_build_goto(struct context* ctx, struct ExpressionT* expr) {
+STATIC struct AstNode* parser_ast_build_goto(struct context* ctx, struct ExpressionT* expr) {
 	struct ExpressionT* symbol = type_cons_car(expr);
 	if (!type_iscons(expr) || type_cons_cdr(expr) || !type_is_symbol(symbol)) {
 		global_set_error_ast(ctx, expr);
@@ -2315,7 +2373,7 @@ struct AstNode* parser_ast_build_goto(struct context* ctx, struct ExpressionT* e
 	return symbol_node;
 }
 
-struct AstNode* parser_ast_build_let(struct context* ctx, struct ExpressionT* expr) {
+STATIC struct AstNode* parser_ast_build_let(struct context* ctx, struct ExpressionT* expr) {
 	if (parser_ast_verify_let(expr)) {
 		global_set_error(ctx, ERROR_SYNTAX);
 		return NULL;
@@ -2340,7 +2398,7 @@ struct AstNode* parser_ast_build_let(struct context* ctx, struct ExpressionT* ex
 	return let_node;
 }
 
-struct AstNode* parser_ast_build_if(struct context* ctx, struct ExpressionT* expr) {
+STATIC struct AstNode* parser_ast_build_if(struct context* ctx, struct ExpressionT* expr) {
 	if(parser_ast_verify_if(ctx, expr)) {
 		// parser_ast_verify_if sets error
 		return NULL;
@@ -2374,7 +2432,7 @@ struct AstNode* parser_ast_build_if(struct context* ctx, struct ExpressionT* exp
 
 /** Build and allocate function expression
  */
-struct AstNode* parser_ast_build_func(
+STATIC struct AstNode* parser_ast_build_func(
 		struct context* ctx,
 		struct ExpressionT* expr) {
 	if (!type_iscons(expr) || !type_cons_car(expr)) {
@@ -2424,7 +2482,7 @@ struct AstNode* parser_ast_build_func(
 	return func_node;
 }
 
-struct ExpressionT* _parser_ast_build_progn_internal(struct context* ctx, struct ExpressionT* expr, u32 num_expressions) {
+STATIC struct ExpressionT* _parser_ast_build_progn_internal(struct context* ctx, struct ExpressionT* expr, u32 num_expressions) {
 	struct ExpressionT* array_ptr =
 		type_array_heapalloc(ctx, num_expressions, sizeof(void*));
 	if (!array_ptr) {
@@ -2455,7 +2513,7 @@ struct ExpressionT* _parser_ast_build_progn_internal(struct context* ctx, struct
  *  (progn
  *    (f-call))
  */
-struct AstNode* parser_ast_build_progn(struct context* ctx, struct ExpressionT* expr) {
+STATIC struct AstNode* parser_ast_build_progn(struct context* ctx, struct ExpressionT* expr) {
 	if (!type_iscons(expr)) {
 		global_set_error_ast(ctx, expr);
 		return NULL;
@@ -2463,7 +2521,7 @@ struct AstNode* parser_ast_build_progn(struct context* ctx, struct ExpressionT* 
 
         // First count number of s-exps in body, so we can allocate big enough
         // array
-	u32 num_expressions = 0;
+        u32 num_expressions = 0;
 	struct ExpressionT* tmp_expr = expr;
 	while (1) {
 		if (!type_iscons(tmp_expr)) {
