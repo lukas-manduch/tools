@@ -79,6 +79,26 @@ void test_assoca_copy() {
 	test_assoca_content1(ass2);
 }
 
+void test_assoca_get_index() {
+	struct context _ctx;
+	struct context *ctx = &_ctx;
+	init_context(ctx);
+	struct ExpressionT* ass = type_assoca_alloc(ctx, 6);
+	test_assoca_insert1(ass);
+	TEST_ASSERT(type_assoca_len(ass) == 3);
+	char buffer[50];
+	u64 value;
+	TEST_ASSERT(type_assoca_get_by_index(ass, 0, buffer, 10, (void**)(&value)) == 5);
+	TEST_ASSERT(c_memcmp(buffer, "alpha", 5) == 0);
+	TEST_ASSERT(value == 44);
+
+	TEST_ASSERT(type_assoca_get_by_index(ass, 1, buffer, 10, (void**)(&value)) == 4);
+	TEST_ASSERT(c_memcmp(buffer, "lexa", 4) == 0);
+	TEST_ASSERT(value == 66);
+
+	TEST_ASSERT(type_assoca_get_by_index(ass, 3, buffer, 10, (void**)(&value)) < 0);
+}
+
 void test_assoca_pack() {
 	struct context _ctx;
 	struct context *ctx = &_ctx;
@@ -136,6 +156,7 @@ void run_test_types_assoca() {
 
 	test_assoca_copy();
 	test_assoca_pack();
+	test_assoca_get_index();
 }
 
 static void run_test_types_array() {

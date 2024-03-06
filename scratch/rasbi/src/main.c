@@ -89,6 +89,7 @@ enum ErrorCodes {
 	ERROR_SYNTAX            = 5,
 	ERROR_BUFFER_SIZE       = 6,
 	ERROR_CRITICAL          = 7,
+	ERROR_BOUNDS            = 8, // Index is out of range
 
 	ERROR_PARSER            = 16,
 	ERROR_PARSER_OOM        = 17, // Used by both parser and ast_builder
@@ -1210,12 +1211,6 @@ void type_varchar_create(void* dest, const char* source, u64 source_length) {
 
 // ------ ASSOCA ------
 
-/* Associative arr laksjdklasjdlkasj d dsfakjsdhfa e  kfjsd sd fjhf sladf
- * aleskf jsdlf sd lfkj sdkfjew rjdj flsdkfj slkkjdsf asdsj fsdlfj lsdkfj ei
- * jslfjeoifjew
- *
- */
-
 /* Associative array
  *
  * Cutom associative array (dictionary), where keys are strings of arbitrary
@@ -1232,7 +1227,7 @@ void type_varchar_create(void* dest, const char* source, u64 source_length) {
  * - Everything is only in one slice of memory
  * - On each insert there is one round of insertion sort, this makes worst case
  *   insert O(N) complexity.
- * - On get, assoca performs binary search, thereofre O (logN) worst
+ * - On get, assoca performs binary search, thereofre O(logN) worst case
  *
  *
  * Example memory layout of array with 4 keys:
@@ -1268,6 +1263,9 @@ void type_varchar_create(void* dest, const char* source, u64 source_length) {
 u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size);
 u32 type_assoca_copy(struct ExpressionT* dest, struct ExpressionT* src);
 u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 value);
+i32 type_assoca_get_by_index(struct ExpressionT* expr, u16 index,
+		char* key_buffer, u32 buffer_size, void** value);
+u16 type_assoca_len(struct ExpressionT* expr);
 INLINE struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count);
 
 /* Standard usage should be to allocate expected size of array (given in
@@ -1293,7 +1291,7 @@ struct AssocaHeader {
 _Static_assert(sizeof(struct AssocaHeader) == 8, "Bad size AssocaHeader");
 
 /** Check whether expression is assoca.
- * Returns TRUE if is and FALSE if it is not
+ *  Returns TRUE if is and FALSE if it is not
  */
 u32 type_isassoca(struct ExpressionT* expr) {
 	if (type_ismem(expr) && expr->expr_type & ASSOCA) {
@@ -1304,7 +1302,7 @@ u32 type_isassoca(struct ExpressionT* expr) {
 
 /** Get pointer to Assoca Header structure
  */
-struct AssocaHeader* _type_assoca_get_header(struct ExpressionT* expr) {
+STATIC struct AssocaHeader* _type_assoca_get_header(struct ExpressionT* expr) {
 	if (!type_isassoca(expr)) {
 		return NULL;
 	}
@@ -1313,15 +1311,15 @@ struct AssocaHeader* _type_assoca_get_header(struct ExpressionT* expr) {
 
 /** Compute assoca header size (used and unused space together)
  */
-u64 _type_assoca_get_header_size(struct AssocaHeader* header) {
+STATIC u64 _type_assoca_get_header_size(struct AssocaHeader* header) {
 	return round8(sizeof(struct AssocaHeader)) +
 		header->entry_max*sizeof(struct Varchar*);
 }
 
 /** Insert value on any available position in header.
- * On success return 0. If header is full, return 1.
+ *  On success return 0. If header is full, return 1.
  */
-u64 _type_assoca_header_insert(struct AssocaHeader* header, u64 value) {
+STATIC u64 _type_assoca_header_insert(struct AssocaHeader* header, u64 value) {
 	if (header->entry_count >= header->entry_max) {
 		return 1;
 	}
@@ -1335,9 +1333,9 @@ u64 _type_assoca_header_insert(struct AssocaHeader* header, u64 value) {
  *  entries, so it is always callers responsibility to check if insert was
  *  successful.
  *
- * Returns pointer on success and NULL on failure (allocation fail)
+ *  Returns pointer on success and NULL on failure (allocation fail)
  */
-struct ExpressionT* _type_assoca_alloc(struct context* ctx, u32 count, int alloc_on_stack) {
+STATIC struct ExpressionT* _type_assoca_alloc(struct context* ctx, u32 count, int alloc_on_stack) {
 	// Size to fit approximately count english words
 	u32 request_size = round8(sizeof(struct AssocaHeader))
 		+ count*sizeof(u64)  // Entries in AssocaHeader
@@ -1379,7 +1377,7 @@ INLINE struct ExpressionT* type_assoca_alloc(struct context* ctx, u32 count) {
 
 /** Get pointer with largest address
  */
-struct Varchar* _type_assoca_get_lastp(struct AssocaHeader* header) {
+STATIC struct Varchar* _type_assoca_get_lastp(struct AssocaHeader* header) {
 	struct Varchar* largest = NULL;
 
 	for (u16 i = 0; i < header->entry_count; i++) {
@@ -1393,7 +1391,7 @@ struct Varchar* _type_assoca_get_lastp(struct AssocaHeader* header) {
 
 /** Get pointer to first free space, after last entry.
  */
-struct Varchar* _type_assoca_get_free(struct ExpressionT* expr) {
+STATIC struct Varchar* _type_assoca_get_free(struct ExpressionT* expr) {
 	if (!type_isassoca(expr))
 		return 0;
 	struct AssocaHeader* header = _type_assoca_get_header(expr);
@@ -1414,7 +1412,7 @@ struct Varchar* _type_assoca_get_free(struct ExpressionT* expr) {
 /** Count available space behind last entry in assoca.
  * This space must fit both value and varchar structure
  */
-u64 _type_assoca_count_free_space(struct ExpressionT* expr) {
+STATIC u64 _type_assoca_count_free_space(struct ExpressionT* expr) {
 	if (!type_isassoca(expr)) {
 		return 0;
 	}
@@ -1429,7 +1427,7 @@ u64 _type_assoca_count_free_space(struct ExpressionT* expr) {
 
 /** Cmp function (sort compatible) for assoca. Works with (struct Varchar*)
  */
-i64 _type_assoca_cmp(const void* lhs, const void* rhs) {
+STATIC i64 _type_assoca_cmp(const void* lhs, const void* rhs) {
 	const struct Varchar  *right, *left;
 	right = *(struct Varchar**)rhs;
 	left = *(struct Varchar**)lhs;
@@ -1445,7 +1443,8 @@ i64 _type_assoca_cmp(const void* lhs, const void* rhs) {
  * Performs linear search through all entries.
  * On error returns NULL
  */
-struct Varchar* _type_assoca_find_entry(
+#if 0 // This is kept here for debug purpose only
+STATIC  struct Varchar* _type_assoca_find_entry(
 		struct ExpressionT* expr, const char* str, u64 size) {
 	struct Varchar* result = NULL;
 	if (!type_isassoca(expr)) {
@@ -1464,12 +1463,13 @@ struct Varchar* _type_assoca_find_entry(
 	}
 	return (void*)result;
 }
+#endif
 
 /** Find STR key and return pointer to it's Varchar structure
  * Performs binary search
  * Returns pointer to struct Varchar or NULL.
  */
-struct Varchar* _type_assoca_find_entry2(
+STATIC struct Varchar* _type_assoca_find_entry2(
 		struct ExpressionT* expr, const char* str, u64 size) {
 	if (!type_isassoca(expr) || size == 0) {
 		return NULL;
@@ -1489,11 +1489,100 @@ struct Varchar* _type_assoca_find_entry2(
 	return NULL;
 }
 
-void _type_assoca_pack(struct ExpressionT* expr);
-void _type_assoca_sort(struct ExpressionT* expr);
+/** Shuffle assoca, so that there is no blank space between entries.
+ * This is potentialy expensive operation, so it is done only if there is no
+ * space left for new entry.
+ */
+STATIC void _type_assoca_pack(struct ExpressionT* expr) {
+	struct AssocaHeader *header = _type_assoca_get_header(expr);
+	if (!header) {
+		return;
+	}
+	struct Varchar *end = (struct Varchar*) // Point behind last checked addr
+		(((char*)header) + _type_assoca_get_header_size(header));
+	for (u32 i = 0; i < header->entry_count; i++) {
+		struct Varchar *smallest = NULL;
+		struct Varchar **smallest_addr = NULL;
+		// Find smallest, not yet moved
+		for (u32 j = 0; j < header->entry_count; j++) {
+			if (header->entries[j] < end) {
+				continue; // Throw away already checked
+			}
+			// Now entry is usable (big enough), but is it the smallest one?
+			if (!smallest || header->entries[j] < smallest) {
+				smallest = header->entries[j];
+				smallest_addr = &header->entries[j];
+			}
+		}
+		if (!smallest) {
+			return;
+		}
+		u64 shift = smallest - end;
+		u64 smallest_size = type_varchar_get_size(smallest) + sizeof(void*);
+		if (shift) {
+			c_memcpy(end, smallest, smallest_size);
+		}
+		*smallest_addr = end; // Edit entry in array
+		end = (struct Varchar*)
+			(((char*)end) + smallest_size);
+	}
+}
+
+/** Sort keys to ascending order
+ */
+STATIC void _type_assoca_sort(struct ExpressionT* expr) {
+	if (!type_isassoca(expr)) {
+		return;
+	}
+	struct AssocaHeader* header = _type_assoca_get_header(expr);
+	c_sort64(header->entries, header->entry_count, _type_assoca_cmp);
+}
+
+/** Get number of entries in assoca.
+ *  Returns length on success
+ *  Returns 0 on error or if assoca is empty
+ */
+u16 type_assoca_len(struct ExpressionT* expr) {
+	if (!type_isassoca(expr)) {
+		return 0;
+	}
+	struct AssocaHeader* header = _type_assoca_get_header(expr);
+	// no need to check header
+	return header->entry_count;
+}
+
+/** Get key and value by index.  This function is build to allow iteration over
+ *  entire map.
+ *
+ *  Returns number of chars (from KEY) written
+ *  Returns negative error code on error.
+ *  Never returns 0
+ */
+i32 type_assoca_get_by_index(struct ExpressionT* expr, u16 index,
+		char* key_buffer, u32 buffer_size, void** value) {
+	if (!type_isassoca(expr)) {
+		return -ERROR_GENERAL;
+	}
+
+	u16 real_length = type_assoca_len(expr);
+	if (index >= real_length) {
+		return -ERROR_BOUNDS;
+	}
+	struct AssocaHeader* header = _type_assoca_get_header(expr); // safe
+	struct Varchar* key_varchar = header->entries[index];
+	if (buffer_size < key_varchar->length) {
+		return -ERROR_BUFFER_SIZE;
+	}
+	c_memcpy(key_buffer, key_varchar->content, key_varchar->length);
+
+	char *value_pointer = (char*) key_varchar;
+	value_pointer += type_varchar_get_size(key_varchar);
+	*value = (void*) *((u64*)value_pointer);
+	return key_varchar->length;
+}
 
 /** Insert VALUE to associative array EXPR under key STR (with length SIZE).
- * On success retunrs 0, on error 1.
+ * On success returns 0, on error 1.
  * Currently no realocations are supported
  * TODO: This must take void pointers (and verify not NULL probably)
  */
@@ -1553,7 +1642,7 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
 }
 
 /** Get pointer stored under STR key in associative array EXPR
- * If STR key doesn't exist, NULL is returned
+ *  If STR key doesn't exist, NULL is returned
  */
 void* type_assoca_get(struct ExpressionT* expr, const char* str, u64 size) {
 	struct Varchar* varchar = _type_assoca_find_entry2(expr, str, size);
@@ -1589,10 +1678,10 @@ u32 type_assoca_copy(struct ExpressionT* dest, struct ExpressionT* src) {
 }
 
 /** Move pointers next to each other, so that there is no space between them.
- * This operation is necessary after deletion, because probably will be some
- * NULL pointer left.
+ * This operation is necessary after deletion, because there will be one NULL
+ * pointer, unless deletion was in the end.
  */
-void _type_assoca_squeeze_index(struct ExpressionT* expr) {
+STATIC void _type_assoca_squeeze_index(struct ExpressionT* expr) {
 	struct AssocaHeader *header = _type_assoca_get_header(expr);
 	if (!header) {
 		return;
@@ -1640,56 +1729,6 @@ u32 type_assoca_delete(struct ExpressionT* expr, const char* key, u32 key_size) 
 	_type_assoca_squeeze_index(expr);
 	return 0;
 }
-
-/** Sort keys to ascending order
- */
-void _type_assoca_sort(struct ExpressionT* expr) {
-	if (!type_isassoca(expr)) {
-		return;
-	}
-	struct AssocaHeader* header = _type_assoca_get_header(expr);
-	c_sort64(header->entries, header->entry_count, _type_assoca_cmp);
-}
-
-/** Shuffle assoca, so that there is no blank space between entries.
- * This is potentialy expensive operation, so it is done only if there is no
- * space left for new entry.
- */
-void _type_assoca_pack(struct ExpressionT* expr) {
-	struct AssocaHeader *header = _type_assoca_get_header(expr);
-	if (!header) {
-		return;
-	}
-	struct Varchar *end = (struct Varchar*) // Point behind last checked addr
-		(((char*)header) + _type_assoca_get_header_size(header));
-	for (u32 i = 0; i < header->entry_count; i++) {
-		struct Varchar *smallest = NULL;
-		struct Varchar **smallest_addr = NULL;
-		// Find smallest, not yet moved
-		for (u32 j = 0; j < header->entry_count; j++) {
-			if (header->entries[j] < end) {
-				continue; // Throw away already checked
-			}
-			// Now entry is usable (big enough), but is it the smallest one?
-			if (!smallest || header->entries[j] < smallest) {
-				smallest = header->entries[j];
-				smallest_addr = &header->entries[j];
-			}
-		}
-		if (!smallest) {
-			return;
-		}
-		u64 shift = smallest - end;
-		u64 smallest_size = type_varchar_get_size(smallest) + sizeof(void*);
-		if (shift) {
-			c_memcpy(end, smallest, smallest_size);
-		}
-		*smallest_addr = end; // Edit entry in array
-		end = (struct Varchar*)
-			(((char*)end) + smallest_size);
-	}
-}
-
 
 // -------- CONS --------
 
@@ -1971,6 +2010,8 @@ LOCAL struct ExpressionT* _parser_alloc_symbol_tokens(struct context* ctx) {
 	ptr['*'] = 1;
 	ptr['/'] = 1;
 	ptr['='] = 1;
+	ptr['<'] = 1;
+	ptr['>'] = 1;
 
 	ptr['_'] = 1;
 	ptr['#'] = 1;
@@ -2348,13 +2389,11 @@ STATIC int parser_ast_verify_let(struct ExpressionT* expr) {
 	}
 
 	// Now we only accept strings as valid values
-	if (!type_isstring(var_value)) {
+	if (!type_isstring(var_value) && !type_isnumber(var_value)) {
 		return 1;
 	}
 	return 0;
 }
-
-struct AstNode* parser_ast_build(struct context*, struct ExpressionT*);
 
 /** Verify and build AST structure for goto expression.
  */
