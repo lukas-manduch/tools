@@ -159,7 +159,7 @@ enum AstSymbol {
 	AST_LET,
 	AST_PROGN,
 	AST_GOTO,
-	//AST_TAG,
+	AST_TAGBODY,
 };
 
 struct AstNode {
@@ -207,6 +207,15 @@ struct AstNode {
 		struct {
 			struct ExpressionT* symbol;
 		} ast_goto;
+
+		// AST_TAGBODY
+		struct {
+			// Array of functions, similar to progn functions
+			struct ExpressionT* functions;
+                        // Associative array of tag_name -> index.  Index is for
+                        // functions array, marking start of tag
+                        struct ExpressionT* tags;
+                } ast_tagbody;
 	};
 };
 
@@ -1843,6 +1852,7 @@ INLINE u32 type_ast_isfunc(struct AstNode* ast) {
 	return type_ast_is(ast, AST_FUNC);
 }
 
+/** Return function pointer from AST_FUNC node */
 INLINE struct ExpressionT* type_ast_func_expr(struct AstNode* node) {
 	if (!type_ast_isfunc(node))
 		return NULL;
@@ -1945,6 +1955,29 @@ struct AstNode* type_ast_alloc_goto(struct context* ctx, struct ExpressionT* sym
 	node->ast_goto.symbol = symbol;
 	return node;
 }
+
+// AST_TAGBODY
+
+/** Return 1 if type is AST_GOTO
+ *  0 otherwise
+ */
+INLINE i32 type_ast_istagbody(struct AstNode* node) {
+	return type_ast_is(node, AST_TAGBODY);
+}
+
+/** Allocate ast goto structure on stack and return pointer
+ */
+struct AstNode* type_ast_alloc_tagbody(struct context* ctx) {
+	struct AstNode* node = _type_ast_alloc_stack(ctx);
+	if (!node) {
+		return NULL;
+	}
+	node->type = AST_TAGBODY;
+	node->ast_tagbody.functions = NULL;
+	node->ast_tagbody.tags = NULL;
+	return node;
+}
+
 
 // ============================
 //   END TYPES
@@ -2340,6 +2373,206 @@ int parse_program(struct context* ctx, const char* buf, u64 size) {
 	return 0;
 }
 
+struct AstNode* parser_ast_build(struct context*, struct ExpressionT*);
+
+/** Verify that structure looks like tagbody.
+ *  return 0 on success
+ *  return 1 on failure
+ */
+STATIC int parser_ast_verify_tagbody(struct context* ctx, struct ExpressionT* expr) {
+	// - Check that tagbody contains only symbols and conses
+	// - Check that at least one symbol exists.
+	if (!type_iscons(expr)) {
+		global_set_error_ast(ctx, expr);
+		return 1;
+	}
+	struct ExpressionT* expr_itr = expr;
+	struct ExpressionT* last_expr = NULL;
+	int symbol_count = 0; // Number of symbols, because we don't want 0
+	while(expr_itr) {
+		struct ExpressionT* car = type_cons_car(expr_itr);
+		if (!car) { // Check for expression NULL
+			global_set_error_ast(ctx, expr); // error on whole expr
+			return 1;
+		}
+		if (type_is_symbol(car)) {
+			symbol_count++;
+			if (type_is_symbol(last_expr)) {
+				// This is problem, we don't want two symbols
+				global_set_error_ast(ctx, car);
+				return 1;
+			}
+		} else if (!type_iscons(car)) {
+			// This must be something unsupported
+			global_set_error_ast(ctx, car);
+			return 1;
+		}
+		last_expr = car;
+		expr_itr = type_cons_cdr(expr_itr);
+	} // end while
+	if (symbol_count == 0) {
+		// We have 0 symbols in tagbody, that is unaceptable
+		global_set_error_ast(ctx, expr);
+		return 1;
+	}
+	return 0;
+}
+
+/** Internal function used to build array of s-expressions. It is used in
+ *  different places, because s-exps are used in more than one structure. E.g.
+ *  let, progn, tagbody
+ *
+ *  SKIP_SYMBOLS when set, causes function to jump over symbols (instead of
+ *  causing error). This setting is set, when building tagbody
+ *
+ *  Returns TYPE_ARRAY on success
+ *  Returns NULL on error and also sets global error
+ */
+STATIC struct ExpressionT* _parser_ast_build_progn_internal(struct context* ctx, struct ExpressionT* expr, int skip_symbols) {
+	// First count number of entries
+	struct ExpressionT* iter = expr;
+	u32 count_sexp = 0;
+	while (iter) {
+		struct ExpressionT* car = type_cons_car(iter);
+
+		if (!type_iscons(car)) {
+			// This might be error, unless we are building tagbody
+			if (!skip_symbols) {
+				global_set_error_ast(ctx, car);
+				return NULL;
+			}
+			// We are skipping symbol, so act as nothing
+		} else {
+			count_sexp++;
+		}
+		iter = type_cons_cdr(iter);
+	}
+
+	struct ExpressionT* array_ptr = // TODO: Stack alloc
+		type_array_heapalloc(ctx, count_sexp, sizeof(void*));
+	if (!array_ptr) {
+		global_set_error_parser_oom(ctx);
+		return NULL;
+	}
+
+	iter = expr;
+	while(iter) {
+		struct ExpressionT* car = type_cons_car(iter);
+		if (type_iscons(car)) { // Push back
+			struct AstNode* parsed_node =
+				parser_ast_build(ctx, car);
+			if (!parsed_node) { // Error is set by parser_ast_build
+				return NULL;
+			}
+			int push_result =
+				type_array_push_back(array_ptr, &parsed_node);
+			if (push_result != 0) { // This should never happen
+				global_set_error_ast_critical(ctx);
+				return NULL;
+			}
+		}
+		iter = type_cons_cdr(iter);
+	}
+	return array_ptr;
+}
+
+/** Helper function for building tagbody. Allocate and fill associative array
+ *  of tag -> index.
+ *  It is assumed that EXPR is checked tagbody and there isn't any error
+ *  checking on this structure.
+ *  This function may set global error
+ *  Returns NULL on failure
+ *  Returns ASSOCA on success
+ */
+STATIC struct ExpressionT* _parser_ast_build_tagassoca(struct context* ctx, const struct ExpressionT* expr) {
+	u16 symbol_count = 0;
+	const struct ExpressionT* iter = expr;
+	// Count symbols and check their sizes
+	while (iter) {
+		struct ExpressionT* car = type_cons_car(iter)
+		if (type_is_symbol(car)) {
+			symbol_count++;
+			u32 symbol_size = type_symbol_get_size(car);
+                        // This 6 here may seem weird.  In time of writing
+                        // this (24 feb 2024), assoca allocation assumes, that
+                        // max size of key is 6.  You of course can have longer
+                        // keys, but than your max number of entries in assoca
+                        // will be less, than specified during allocation and
+                        // you will need to reallocate.  And since we are in
+                        // parser stage and we are allocating everything on
+                        // stack (almost), reallocation is not possible.
+                        if (symbol_size > 6) {
+				global_set_error_symbol_long(ctx, car);
+				return NULL;
+			}
+		}
+		iter = type_cons_cdr(iter);
+	}
+	if (symbol_count == 0) {
+		global_set_error_ast(ctx, expr);
+		return NULL;
+	}
+	// Allocate symbol store
+	struct ExpressionT* dictionary =
+		type_assoca_alloc_stack(ctx, symbol_count);
+	if (!dictionary) {
+		global_set_error_parser_oom(ctx);
+		return NULL;
+	}
+	iter = expr;
+	// Build symbol->index table
+	u64 index = 0;
+	while(iter) {
+		// Very similar to the loop above
+		struct ExpressionT* car = type_cons_car(iter);
+		if (!type_is_symbol(car)) {
+			// This is just regular entry, that will be in array
+			// built by different function.
+			index++;
+			goto loop_end;
+		}
+		i32 ret_code = type_assoca_insert(
+				dictionary, type_symbol_get_str(car),
+				type_symbol_get_size(car), index);
+		if (ret_code != 0) {
+			global_set_error_ast_critical(ctx);
+			return NULL;
+		}
+loop_end:
+		iter = type_cons_cdr(iter);
+	}
+	return dictionary;
+}
+
+
+STATIC struct AstNode* parser_ast_build_tagbody(struct context* ctx, struct ExpressionT* expr) {
+	if (parser_ast_verify_tagbody(ctx, expr) != 0) {
+		// Error is already set by parser_ast_verify_tagbody
+		return NULL;
+	}
+	struct ExpressionT* dictionary =
+		_parser_ast_build_tagassoca(ctx, expr);
+	if (!dictionary) {
+		// Error is set by _parser_ast_build_tagassoca
+		return NULL;
+	}
+	struct ExpressionT* function_array =
+		_parser_ast_build_progn_internal(ctx, expr, 1);
+	if (!function_array) {
+		// Error set by _parser_ast_build_progn_internal
+		return NULL;
+	}
+	struct AstNode* ast_node = type_ast_alloc_tagbody(ctx);
+	if (!ast_node) {
+		global_set_error_parser_oom(ctx);
+		return NULL;
+	}
+
+	ast_node->ast_tagbody.tags = dictionary;
+	ast_node->ast_tagbody.functions = function_array;
+	return ast_node;
+}
+
 /** Check that 'if' syntax looks ok.
  * Return 0 on success or 1 on failure
  */
@@ -2533,30 +2766,6 @@ STATIC struct AstNode* parser_ast_build_func(
 	return func_node;
 }
 
-STATIC struct ExpressionT* _parser_ast_build_progn_internal(struct context* ctx, struct ExpressionT* expr, u32 num_expressions) {
-	struct ExpressionT* array_ptr =
-		type_array_heapalloc(ctx, num_expressions, sizeof(void*));
-	if (!array_ptr) {
-		global_set_error_parser_oom(ctx);
-		return NULL;
-	}
-	for (u32 i = 0; i < num_expressions; i++) {
-		struct ExpressionT* line = type_cons_car(expr);
-		// TODO: This should be parsed here
-		if (!line) {
-			global_set_error_ast(ctx, expr);
-			return NULL;
-		}
-		struct AstNode* parsed_node = parser_ast_build(ctx, line);
-		if (!parsed_node) { // Error is set by parser_ast_build
-			return NULL;
-		}
-		type_array_push_back(array_ptr, &parsed_node);
-		expr = type_cons_cdr(expr);
-	}
-	return array_ptr;
-}
-
 /** Build Ast for progn, given pointer to first element after "progn".
  *  Currently progn is supported only in form where all members are
  *  s-expressions, and there must be at least one.
@@ -2573,23 +2782,18 @@ STATIC struct AstNode* parser_ast_build_progn(struct context* ctx, struct Expres
         // First count number of s-exps in body, so we can allocate big enough
         // array
         u32 num_expressions = 0;
-	struct ExpressionT* tmp_expr = expr;
-	while (1) {
-		if (!type_iscons(tmp_expr)) {
-			if (tmp_expr == NULL) {
-				// We are at the end
-				break;
-			} else {
-				global_set_error_ast(ctx, tmp_expr);
-			}
+	struct ExpressionT* iter = expr;
+	while (iter) {
+		if (!type_iscons(iter)) {
+			global_set_error_ast(ctx, iter);
 		}
 		// Now check if progn line is another s-exp. If not, it is
 		// probably just value, and it is error
-		if (!type_iscons(type_cons_car(tmp_expr))) {
-			global_set_error_unsupported_ast(ctx, tmp_expr);
+		if (!type_iscons(type_cons_car(iter))) {
+			global_set_error_unsupported_ast(ctx, iter);
 			return NULL;
 		}
-		tmp_expr = type_cons_cdr(tmp_expr);
+		iter = type_cons_cdr(iter);
 		num_expressions++;
 	}
 
@@ -2600,7 +2804,7 @@ STATIC struct AstNode* parser_ast_build_progn(struct context* ctx, struct Expres
 	}
 	// Now call function that builds array
 	struct ExpressionT* functions_array =
-		_parser_ast_build_progn_internal(ctx, expr, num_expressions);
+		_parser_ast_build_progn_internal(ctx, expr, 0);
 	if (!functions_array) {
 		// Error will be set by _parser_ast_build_progn_internal
 		return NULL;
@@ -2649,6 +2853,7 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 	const char keyword_let[] = {'l', 'e', 't'};
 	const char keyword_progn[] = {'p', 'r', 'o', 'g', 'n'};
 	const char keyword_goto[] = {'g', 'o', 't', 'o'};
+	const char keyword_tagbody[] = {'t', 'a', 'g', 'b', 'o', 'd', 'y'};
 
 
 	// AST_IF
@@ -2685,6 +2890,15 @@ struct AstNode* parser_ast_build(struct context* ctx, struct ExpressionT* expr) 
 		struct AstNode* node = parser_ast_build_goto(ctx, type_cons_cdr(expr));
 		if (!node) {
 			// parser_ast_build_goto sets error
+			return NULL;
+		}
+		return node;
+	// AST_TAGBODY
+	} else if (symbol_size == sizeof(keyword_tagbody)
+			&& c_memcmp(keyword_tagbody, symbol_str, sizeof(keyword_tagbody)) == 0) {
+		struct AstNode* node = parser_ast_build_tagbody(ctx, type_cons_cdr(expr));
+		if (!node) {
+			// parser_ast_build_tagbody sets error
 			return NULL;
 		}
 		return node;
@@ -3401,7 +3615,54 @@ void _debug_print_ast_space(u32 depth) {
 	}
 }
 
-void debug_print_ast(struct AstNode* ast, u32 depth) {
+STATIC void debug_print_ast(struct AstNode* ast, u32 depth);
+
+STATIC void _debug_print_ast_tagbody(struct AstNode* ast, u32 depth) {
+	struct ExpressionT* tags = ast->ast_tagbody.tags;
+	struct ExpressionT* functions = ast->ast_tagbody.functions;
+	// Now let's copy all index pointers from tags. If someone has more
+	// tags, this will be wrong. But this is just a debug function anyway
+	u16 length =  type_assoca_len(tags);
+	u64 indices[10]; // I don't want to dynamically allocate this c style
+	if (length > 10) {
+		c_printf0("Too many tags");
+		return;
+	}
+	for (int i = 0; i < length; i++) {
+		char buffer[100];
+		type_assoca_get_by_index(tags, i, buffer, 100, (void**)&indices[i]);
+	}
+	for (u64 i = 0; i <= type_array_len(functions); i++) {
+		// Let's find if some tag belongs here
+		for (u64 j = 0; j < length; j++) {
+			if (indices[j] == i) {
+				char buffer[100];
+				u64 _ignore;
+				i32 written = type_assoca_get_by_index(tags, j, buffer,
+						100, (void**)&_ignore);
+
+				if (written < 0) {
+					c_printf0("Error tag\n");
+				} else {
+					buffer[written] = 0;
+					_debug_print_ast_space(depth);
+					c_printf1("%s:\n", buffer);
+				}
+
+			}
+
+		}
+		// Here we might already be of by one, so in that case break
+		if (i == type_array_len(functions)) {
+			break;
+		}
+		struct AstNode** func_node = 0;
+		func_node = type_array_get(functions, i);
+		debug_print_ast(*func_node, depth+2);
+	}
+}
+
+STATIC void debug_print_ast(struct AstNode* ast, u32 depth) {
 	_debug_print_ast_space(depth);
 	if (!ast) {
 		c_printf0("NULL\n");
@@ -3462,6 +3723,9 @@ void debug_print_ast(struct AstNode* ast, u32 depth) {
 		c_memcpy(buffer, symbol_str, max_len);
 		buffer[max_len] = 0;
 		c_printf1("GOTO %s\n", buffer);
+	} else if (type_ast_istagbody(ast)) {
+		c_printf0("TAGBDOY\n");
+		_debug_print_ast_tagbody(ast, depth+2);
 	}
 }
 
