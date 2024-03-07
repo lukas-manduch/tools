@@ -926,7 +926,7 @@ void type_number_set_value(struct ExpressionT* expr, i64 value) {
 /** Safely check if expr is chunk of memory
  *
  */
-INLINE u32 type_ismem(struct ExpressionT* expr) {
+INLINE u32 type_ismem(const struct ExpressionT* expr) {
 	if (expr && ((expr->expr_type) & MEMORY)) {
 		return TRUE;
 	}
@@ -969,19 +969,24 @@ INLINE struct ExpressionT* type_mem_alloc_stack(struct context* ctx, u32 size) {
 	return _type_mem_alloc(ctx, size, 1);
 }
 
-/** Get arbitrary location from mem chunk as pointer.
- * Returns NULL if index is out of range, or expr is not valid mem chunk
- */
-INLINE void* type_mem_get_loc(struct ExpressionT* expr, u32 index) {
+/** Const version of type_mem_get_loc*/
+INLINE const void* type_mem_get_locc(const struct ExpressionT* expr, u32 index) {
 	if (!type_ismem(expr) || expr->value_memory.taken <= index) {
 		return NULL;
 	}
 	return &expr->value_memory.mem[index];
 }
 
+/** Get arbitrary location from mem chunk as pointer.
+ * Returns NULL if index is out of range, or expr is not valid mem chunk
+ */
+INLINE void* type_mem_get_loc(struct ExpressionT* expr, u32 index) {
+	return (void*)type_mem_get_locc(expr, index);
+}
+
 /**  Get memory address of indexed element, or NULL.
  */
-u64* type_mem_get_u64(struct ExpressionT* expr, u32 index) {
+u64* type_mem_get_u64(const struct ExpressionT* expr, u32 index) {
 	const u32 value_size = sizeof(u64);
 	u32 min_required = (index + 1) * value_size;
 	if (!type_ismem(expr) || expr->value_memory.taken < min_required) {
@@ -1015,7 +1020,7 @@ i64 type_mem_push_u64(struct ExpressionT* expr, u64 value) {
 /** Get length of taken memory in bytes.
  * Returns number of used bytes or -1 on error
  */
-i64 type_mem_get_len(struct ExpressionT* expr) {
+i64 type_mem_get_len(const struct ExpressionT* expr) {
 	if(type_ismem(expr)) {
 		return expr->value_memory.taken;
 	}
@@ -1045,7 +1050,7 @@ _Static_assert(sizeof(struct TypeArrayHeader) == 8, "Must be 8 aligned");
 
 /** Return 1 if argument is of type array. 0 otherwise
  */
-INLINE u32 type_isarray(struct ExpressionT* expr) {
+INLINE u32 type_isarray(const struct ExpressionT* expr) {
 	if (expr && type_ismem(expr) && (expr->expr_type & TYPE_ARRAY)) {
 		return 1;
 	}
@@ -1053,8 +1058,13 @@ INLINE u32 type_isarray(struct ExpressionT* expr) {
 }
 
 /** Internal function */
+INLINE const struct TypeArrayHeader* _type_array_get_headerc(const struct ExpressionT* expr) {
+	return type_mem_get_locc(expr, 0);
+}
+
+/** Internal function */
 INLINE struct TypeArrayHeader* _type_array_get_header(struct ExpressionT* expr) {
-	return type_mem_get_loc(expr, 0);
+	return (struct TypeArrayHeader*)_type_array_get_headerc(expr);
 }
 
 /** Internal function */
@@ -1082,12 +1092,11 @@ struct ExpressionT* type_array_heapalloc(struct context* ctx, u32 elem_count, u3
 /** Return number of elements currently in array
  *  On error returns 0
  */
-u32 type_array_len(struct ExpressionT* expr) {
+u32 type_array_len(const struct ExpressionT* expr) {
 	if (!type_isarray(expr)) {
 		return 0;
 	}
-	struct TypeArrayHeader *header = _type_array_get_header(expr);
-	return header->taken;
+	return _type_array_get_headerc(expr)->taken;
 }
 
 /** Return pointer to location of data on position INDEX
@@ -1893,13 +1902,16 @@ INLINE u32 type_ast_islet(struct AstNode* node) {
 
 // AST_PROGN
 
-INLINE struct AstNode* type_ast_alloc_progn(struct context* ctx) {
+INLINE struct AstNode* type_ast_alloc_progn(struct context* ctx, struct ExpressionT* expr) {
+	if (!type_isarray(expr)) {
+		return NULL;
+	}
 	struct AstNode* node = _type_ast_alloc_stack(ctx);
 	if (!node) {
 		return NULL;
 	}
 	node->type = AST_PROGN;
-	node->ast_progn.functions = NULL;
+	node->ast_progn.functions = expr;
 	return node;
 }
 
@@ -2593,16 +2605,15 @@ STATIC struct AstNode* parser_ast_build_progn(struct context* ctx, struct Expres
 		// Error will be set by _parser_ast_build_progn_internal
 		return NULL;
 	}
-	struct AstNode* result = type_ast_alloc_progn(ctx);
+	struct AstNode* result = type_ast_alloc_progn(ctx, functions_array);
 	if (!result) {
 		global_set_error_parser_oom(ctx);
 		return NULL;
 	}
-	result->ast_progn.functions = functions_array;
 	return result;
 }
 
-/* Builder of absctract syntax tree.
+/* Builder of abstract syntax tree.
  *
  * Ast build is second phase of parsing, which recognizes in parsed
  * s-expressions important structures.  Structures like ifs gotos and variable
