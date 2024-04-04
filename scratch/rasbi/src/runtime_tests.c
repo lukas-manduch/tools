@@ -49,6 +49,9 @@ static inline void run_test_runtime_format() {
 	const u64 args1[] = {(u64)str1, (u64)num1};
 	TEST_ASSERT(runtime_format("Hello %s! Your happy number is %d.", destination, 100, (const u64* )args1) == 38);
 	TEST_ASSERT(c_strcmp("Hello Peter! Your happy number is 88.", destination) == 0);
+
+	TEST_ASSERT(runtime_format("Test end %d", destination, 100, (const u64* )&args1[1]) == 12);
+	TEST_ASSERT(c_strcmp("Test end 88", destination) == 0);
 }
 
 void run_tests_runtime() {

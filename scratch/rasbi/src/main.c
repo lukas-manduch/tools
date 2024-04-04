@@ -590,8 +590,8 @@ INLINE i32 _global_format_error_wrapper(const char* format_str, char* buffer, u6
  */
 i32 global_format_error(struct context* ctx, char* buffer, u32 max_size) {
 	[[maybe_unused]]const char err_format[] =
-		{ 'E' , ':', ' ', '%', 'd', ' ', '%', 's' };
-	const char err_format_number[] = { 'E' , ':', ' ', '%', 'd'};
+		{ 'E' , ':', ' ', '%', 'd', ' ', '%', 's' , 0};
+	const char err_format_number[] = { 'E' , ':', ' ', '%', 'd', 0};
 	u64 params[2];
 	u64 error_code = global_get_error(ctx);
 
@@ -2489,7 +2489,7 @@ STATIC struct ExpressionT* _parser_ast_build_tagassoca(struct context* ctx, cons
 	const struct ExpressionT* iter = expr;
 	// Count symbols and check their sizes
 	while (iter) {
-		struct ExpressionT* car = type_cons_car(iter)
+		struct ExpressionT* car = type_cons_car(iter);
 		if (type_is_symbol(car)) {
 			symbol_count++;
 			u32 symbol_size = type_symbol_get_size(car);
@@ -3535,6 +3535,7 @@ loop:
 		argv_index++;
 		is_formatting = FALSE;
 		fmt++;
+		goto loop;
 	}
 
 	// Just a regular copy
@@ -3833,9 +3834,23 @@ void builtin_read_file(struct context* ctx) {
 #include "src/tests.c"
 #endif
 
-void debug_ast(struct context* ctx) {
-	struct AstNode* node = parser_ast_build(ctx, ctx->program);
-	debug_print_ast(node, 0);
+// ============================
+//   REPL
+// ============================
+
+// Group of functions, that are used to run language as standalone interpreter,
+// instead of embedded thing. This doesn't mean only for repl mode.
+
+void repl_print_error(struct context* ctx) {
+	if (global_is_error(ctx)) {
+		char text[100];
+		text[99] = 0;
+		global_format_error(ctx, text, 100);
+		c_printf1("%s\n",text);
+	}
+
+	debug_print_error(ctx);
+
 	char error_buffer[100];
 	if (global_format_error(ctx, error_buffer, 100) != 0 ) {
 		c_printf0("Critical error\n");
