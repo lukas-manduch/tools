@@ -240,8 +240,9 @@ struct context {
 	char stack[STACK_SIZE];
 	unsigned short _stack_pointer;
 	struct ExpressionT* program; // (CONS) parsed program
-	struct ExpressionT* parent_table; // (mem) Function call graph
-	struct ExpressionT* return_values; // (mem) Return values from funtion graph
+	struct AstNode* program_ast; // program parsed to AST
+	//struct ExpressionT* parent_table; // (mem) Function call graph
+	//struct ExpressionT* return_values; // (mem) Return values from funtion graph
 	struct ExpressionT* builtins; // (assoca) Builtin functions
 
 	// This variable represents context, that can be passed with this down
@@ -446,8 +447,7 @@ void init_context(struct context* ctx) {
 	ctx->_stack_pointer = STACK_SIZE;
 	init_heap(ctx->heap, HEAP_SIZE);
 	ctx->program = NULL;
-	ctx->parent_table = NULL;
-	ctx->return_values = NULL;
+	ctx->program_ast = NULL;
 	ctx->builtins = NULL;
 	ctx->error_code = 0;
 	ctx->stage = (void*)0;
@@ -2981,109 +2981,7 @@ i64 interpreter_is_expr_function_call(struct ExpressionT* expr) {
 	return FALSE;
 }
 
-/** This function goes through parent tree and finds nth node pointing to expr
- *  Returns index of nth child on success or 0 on error. 0 is never valid as
- *  index of child, because 0 doesn't have any parent and points to itself.
- *
- */
-u64 interpreter_find_nth_child_func_index(
-		struct context* ctx, struct ExpressionT* expr, u64 n) {
 
-	struct ExpressionT* parents = ctx->parent_table;
-	if (!type_ismem(parents)) {
-		DEBUG_ERROR("Nth child index bad parent_table");
-		return 0;
-	}
-	u32 parent_len = type_mem_get_len(parents) / sizeof(u64);
-	u64 found_children = 0;
-
-	for (u32 i = 0; i < parent_len; i++) {
-		u64* value = type_mem_get_u64(parents, i);
-		// Value can't be NULL
-		if (((struct ExpressionT*)*value) == expr)
-			found_children++;
-
-		if (found_children == n)
-			return i;
-	}
-	return 0;
-}
-
-/** Push arguments on stack and resolve function return values.
- *  expr is pointer to function call in syntax tree.
- */
-i64 interpreter_push_args(struct context* ctx, struct ExpressionT* expr) {
-	u64 arg_count = 0;
-	u64 function_calls = 0;
-
-	struct ExpressionT* rest = type_cons_cdr(expr);
-
-	if(!type_iscons(expr) || !type_is_symbol(type_cons_car(expr))) {
-		DEBUG_ERROR("Invalid function push args");
-		return -1;
-
-	}
-
-	while (rest) {
-		struct ExpressionT * val = type_cons_car(rest);
-		if (!val) {
-			DEBUG_ERROR("Invalid function call, (parser error)");
-			return -1;
-		}
-
-		// If this is function call, we have to replace the literal
-		// function call with return value of func call.
-		if (interpreter_is_expr_function_call(val)) {
-			function_calls++;
-			u64 child_index = interpreter_find_nth_child_func_index(
-					ctx, expr, function_calls);
-			if (child_index == 0) {
-				DEBUG_ERROR("unresolved deps in call graph");
-				return -1;
-			}
-			// Pull real return value
-			val = (struct ExpressionT*)
-				(*type_mem_get_u64(ctx->return_values, child_index));
-		}
-
-		void *stackp = stack_push_u64(ctx, (u64)val);
-		if (!stackp) {
-			DEBUG_ERROR("Stack push failed");
-			return -1;
-		}
-		rest = type_cons_cdr(rest);
-		arg_count++;
-	}
-	stack_push_u64(ctx, arg_count);
-	return 0;
-}
-
-/** Get nested function call pointer.
- * Positions are indexed from 1. Position 2 means - try to find second function
- * call and return its pointer.
- *
- * Returns pointer to function call or NULL
- */
-struct ExpressionT* interpreter_get_nested_func(
-		struct ExpressionT* expr, u64 position) {
-	if (!type_iscons(expr)) {
-		DEBUG_ERROR("Expression is not a list (get nested func)");
-		return NULL;
-	}
-	u64 found_count = 0;
-	struct ExpressionT* current = (expr);
-	while (current) {
-		struct ExpressionT* value = type_cons_car(current);
-		if (interpreter_is_expr_function_call(value)) {
-			found_count++;
-			if (found_count == position) {
-				return value;
-			}
-		}
-		current = type_cons_cdr(current);
-	}
-	return NULL;
-}
 
 void builtin_concat(struct context* ctx);
 void builtin_stdout(struct context* ctx);
@@ -3107,153 +3005,6 @@ u64 _interpreter_count_expr_nodes_internal(struct ExpressionT* expr) {
 		cons_expr = type_cons_cdr(cons_expr);
 	}
 	return total_children + 1;
-}
-
-/** Return count of function calls in expression and it's children.
- * This function is recursive.
- */
-u64 interpreter_count_expr_nodes(struct context* ctx) {
-	if (!ctx->program) {
-		DEBUG_ERROR("Program not parsed");
-		return 0;
-	}
-	return _interpreter_count_expr_nodes_internal(ctx->program);
-}
-
-/** Retrieve function by index.
- * Currently this causes recursive search, but I don't care about speed rn.
- */
-struct ExpressionT* interpreter_get_function_by_index(
-		struct context* ctx, u64 order) {
-
-	struct ExpressionT* node = ctx->program;
-	u64 index = 0;
-	u64 counted = 0;
-
-	while (order != index) {
-		int i = 0;
-		while (1) {
-			i++; // nested functions start at 1
-			struct ExpressionT* tmp =
-				interpreter_get_nested_func(node, i);
-
-			if (!tmp) { // Order arg must be out of range
-				DEBUG_ERROR("Cannot find by index");
-				return NULL;
-			}
-
-			u64 current_node_count =
-				_interpreter_count_expr_nodes_internal(tmp);
-
-			if ((current_node_count + counted) >= order) {
-				// This is subtree we want to dive into
-				index = counted + 1;
-				node = tmp;
-				break;
-
-			} else {
-				counted += current_node_count;
-			}
-		}
-	}
-	return node;
-}
-
-struct ExpressionT* interpreter_call_function(
-		struct context* ctx, struct ExpressionT* expr) {
-	struct ExpressionT* ret = NULL;
-	struct ExpressionT* func = type_cons_car(expr);
-	if (!func) {
-		DEBUG_ERROR("Func error");
-		return ret;
-	}
-	if (func->expr_type == SYMBOL) {
-		sys_write(1, "===", 3);
-		sys_write(1, func->value_symbol.content, func->value_symbol.size);
-		sys_write(1, "===\n", 4);
-	}
-
-	u64 stack_pointer = stack_get_sp(ctx);
-	void* ret_val_pointer = stack_push_u64(ctx, 0); // Space for return value
-
-	if (interpreter_push_args(ctx, expr) != 0) {
-		goto end;
-	}
-
-	void (*builtin_function)(struct context*) = NULL;
-
-	builtin_function = type_assoca_get(ctx->builtins,
-			func->value_symbol.content, func->value_symbol.size);
-
-	if (!builtin_function) {
-		// TODO: Panic
-		DEBUG_ERROR("Error unknown function");
-		goto end;
-	}
-
-	// Let's assume its concat
-	builtin_function(ctx);
-
-	// Now get return value
-	ret = *((struct ExpressionT**)ret_val_pointer);
-end:
-	stack_set_sp(ctx, stack_pointer);
-	return ret;
-}
-
-struct ExpressionT* interpreter_build_parent_graph(struct context* ctx) {
-	u64 node_count = interpreter_count_expr_nodes(ctx);
-	if (!node_count) {
-		DEBUG_ERROR("Parent graph err");
-		return NULL;
-	}
-	struct ExpressionT* graph = type_mem_alloc(
-		ctx, node_count*sizeof(struct ExpressionT*)); // pointer size
-
-	type_mem_push_u64(graph, 0); // Parent of first is 0
-
-	struct ExpressionT* current = NULL;
-	struct ExpressionT* tmp = NULL;
-	u64 position = 0;
-	i64 push_ret = -1;
-
-	sys_stack_push_u64(NULL);
-	sys_stack_push_u64(NULL);
-
-	sys_stack_push_u64((u64)ctx->program);
-	sys_stack_push_u64(0);
-
-	while(1) {
-		// Stack shouldn't be used here
-		position = sys_stack_pop_u64();
-		current = (struct ExpressionT*)sys_stack_pop_u64();
-
-		if (current == NULL && position == 0) { // Everything is done
-			break;
-		}
-
-		tmp = interpreter_get_nested_func(current, ++position);
-		if (tmp == NULL) { // There is nowhere to dive deeper, so
-				   // let's go one up
-			continue;
-		}
-
-		push_ret = type_mem_push_u64(graph, (u64)current); // We are pushing parent
-		if (push_ret == -1) {
-			DEBUG_ERROR("Cannot build graph (maybe cleanup)");
-			return NULL;
-		}
-
-		// We found next function
-		// First preserve current position
-		sys_stack_push_u64((u64)current);
-		sys_stack_push_u64(position);
-		// Now set up for next iteration
-		sys_stack_push_u64((u64)tmp);
-		sys_stack_push_u64(0);
-	}
-
-	return graph;
 }
 
 u64 interpreter_load_builtins(struct context* ctx) {
@@ -3293,55 +3044,20 @@ u64 interpreter_load_builtins(struct context* ctx) {
 	return 0;
 }
 
-int execute(struct context* ctx) {
+/** Execute program, that was already parsed and is saved in context.
+ *  This is main function for starting the program (after parsing)
+ **/
+int interpreter_execute(struct context* ctx) {
 	if(!ctx->program) {
 		return -1;
 	}
 
-	if (interpreter_load_builtins(ctx)) {
-		DEBUG_ERROR("Error loading builtins");
-		return-1;
-	}
-
-	struct ExpressionT* parents = interpreter_build_parent_graph(ctx);
-	struct ExpressionT* ret_vals = type_mem_alloc(ctx, type_mem_get_len(parents));
-	if (!parents || !ret_vals) {
-		return -1;
-	}
-
-	if (type_mem_memset(ret_vals, 0, type_mem_get_len(parents)) == -1) {
-		// There is some problem with memory
-		return -1;
-	}
-
-	ctx->parent_table = parents;
-	ctx->return_values = ret_vals;
-
-	// Start with last function
-	u64 current_function = type_mem_get_len(parents) / sizeof(u64) - 1;
-
-	// Retrieve function
-	while (1) {
-		struct ExpressionT* current_f =
-			interpreter_get_function_by_index(ctx, current_function);
-		struct ExpressionT* fret = NULL;
-		fret = interpreter_call_function(ctx, current_f);
-		if (fret == NULL) {
-			DEBUG_ERROR("Error calling function");
-			return -1;
-		}
-		*type_mem_get_u64(ret_vals, current_function) = (u64)fret;
-		// Save return value
-		if (current_function == 0) { // This was the last one
-			return 0;
-		}
-		current_function--;
-	}
+	//if (interpreter_load_builtins(ctx)) {
+	//	DEBUG_ERROR("Error loading builtins");
+	//	return-1;
+	//}
+	return 0;
 }
-
-void interpreter_set_variable();
-void interpreter_create_variable();
-void interpreter_delete_variable();
 
 // ============================
 //   END INTERPRETER
@@ -3593,23 +3309,6 @@ void debug_to_cstring(struct ExpressionT* src, char* dest, u32 max_size) {
 	}
 }
 
-void debug_print_error(struct context* ctx) {
-	switch (ctx->error_code) {
-		case 0:
-			c_printf0("No Error\n");
-			break;
-		case ERROR_ARGUMENT:
-			c_printf0("Bad argument\n");
-			break;
-		case ERROR_SYNTAX:
-			c_printf0("Bad syntax\n");
-			break;
-		default:
-			c_printf0("Unknown error\n");
-	}
-
-}
-
 void _debug_print_ast_space(u32 depth) {
 	for (u32 i = 0; i < depth; i++) {
 		c_printf0(" ");
@@ -3849,8 +3548,6 @@ void repl_print_error(struct context* ctx) {
 		c_printf1("%s\n",text);
 	}
 
-	debug_print_error(ctx);
-
 	char error_buffer[100];
 	if (global_format_error(ctx, error_buffer, 100) != 0 ) {
 		c_printf0("Critical error\n");
@@ -3859,57 +3556,63 @@ void repl_print_error(struct context* ctx) {
 	}
 }
 
-// ============================
-//   REPL
-// ============================
-
-// Group of functions, that are used to run language as standalone interpreter,
-// instead of embedded thing. This doesn't mean only for repl mode.
-
 void repl_main() {
+	struct context ctx;
+	init_context(&ctx);
+	c_printf0(REPL_HEADLINE);
+
 	u32 argc = platform_get_argc();
-	if (argc != 2) { // Repl mode is not currently supported
+	if (argc != 2) { // Real repl mode is not implemented
 		c_printf0(REPL_HELP);
-		return;
+		goto error;
 	}
 	char* argv = platform_get_argv(1);
 	i64 script_size = runtime_get_file_size(argv);
 	if (script_size < 0) {
 		c_printf0(REPL_FILE_ERROR);
-		return;
+		goto error;
 	}
-	char content[script_size];
-	i64 result = runtime_read_file(argv, content, script_size);
-	if (result < 0) {
-		c_printf0(REPL_FILE_ERROR);
-		return;
-	}
-	struct context ctx;
-	init_context(&ctx);
-	if (parse_program(&ctx, content, c_strlen(content)) < 0) {
-		if (global_is_error(&ctx)) {
-			char text[100];
-			text[99] = 0;
-			global_format_error(&ctx, text, 100);
-			c_printf1("%s\n",text);
+
+	{
+		char content[script_size];
+		i64 result = runtime_read_file(argv, content, script_size);
+		if (result < 0) {
+			c_printf0(REPL_FILE_ERROR);
+			goto error;
+		}
+		if (parse_program(&ctx, content, c_strlen(content)) < 0) {
+			global_set_error(&ctx, ERROR_PARSER);
+			goto error;
 		}
 
-		global_set_error(&ctx, ERROR_PARSER);
-		debug_print_error(&ctx);
-		sys_exit(1);
 	}
 
-	debug_ast(&ctx);
+	ctx.program_ast = parser_ast_build(&ctx, ctx.program);
+	if (!ctx.program_ast) {
+		c_printf0("Error in program syntax\n");
+		goto error;
+	}
+
+#ifdef DEBUG
+	debug_print_ast(ctx.program_ast, 0);
+#endif
+
+	if (interpreter_execute(&ctx) == 0) {
+		sys_exit(0);
+	}
+error:
+	repl_print_error(&ctx);
+	sys_exit(1);
 }
 
-// ============================
-//   END REPL
-// ============================
 void _start() {
 #ifdef TEST
 	run_tests();
 #endif
 	repl_main();
-	sys_exit(0);
 }
+
+// ============================
+//   END REPL
+// ============================
 

@@ -39,8 +39,8 @@ _Static_assert(sizeof(u16) == 2, "Bad size");
 #endif
 
 #ifdef REPL
-#define REPL_HELP "This is rasbi. Copyright 2024 Lukas Manduch\n"\
-	"To run script, call application like:\n"\
+#define REPL_HEADLINE "This is rasbi. Copyright 2024 Lukas Manduch\n"
+#define REPL_HELP "Error, requires one argument - path to script\n"\
 	"rasbi <script_file>\n"
 #define REPL_FILE_ERROR "Problem opening script to run\n"
 #define FORMAT_STRING(simple, complex) complex
