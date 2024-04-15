@@ -1,16 +1,19 @@
+# TODO: Environment
 import argparse
+import hashlib
 import json
-import sys
-import subprocess
 import re
+import shutil
+import subprocess
+import sys
 
 import yaml
 
 
 def get_unit_section(content, section_name):
     """Return key value pairs from content, that are under [section_name]"""
-    section_pattern = re.compile(r'^\s*\[(?P<name>\w+)\]\s*$')
-    line_pattern = re.compile(r'^\s*(?P<key>\w+)=(?P<value>.+)$')
+    section_pattern = re.compile(r"^\s*\[(?P<name>\w+)\]\s*$")
+    line_pattern = re.compile(r"^\s*(?P<key>\w+)=(?P<value>.+)$")
     lines_inside = list()
     is_inside = False
     for line in content.splitlines():
@@ -26,25 +29,117 @@ def get_unit_section(content, section_name):
     results = list()
     for line in lines_inside:
         if match := line_pattern.match(line):
-            results.append((match["key"], match["value"],))
+            results.append(
+                (
+                    match["key"],
+                    match["value"],
+                )
+            )
     return results
 
+def _cut_quotes(line, quote):
+    position = line.find(quote)
+    if position == -1:
+        return None
+    pos2 = line.find(quote, position+1)
+    if pos2 == -1:
+        return None
+    return line[position+1: pos2], line[pos2+1:]
+
+
+def cut_command_line(command: str):
+    # First handle quotes
+    parts = list()
+    results = (None, str(command), )
+    # Double quotes
+    while True:
+        results = _cut_quotes(results[1], '"')
+        if results == None:
+            break
+        parts.append(results[0])
+    # Single quotes
+    results = (None, str(command), )
+    while True:
+        results = _cut_quotes(results[1], "'")
+        if results == None:
+            break
+        parts.append(results[0])
+    # Spaces
+    return parts + command.split(sep=" ")
 
 
 
+class FileHasher:
 
-class SystemdService():
+    def __init__(self):
+        self.short_names = dict()
+        self.exe_hashes = dict()
+
+    def get(self, name):
+        path = shutil.which(name)
+        if path == None:
+            return None
+        self.short_names[name] = path
+        hexdigest = self._compute_hash(path)
+        self.exe_hashes[path] = hexdigest
+        return hexdigest
+
+    def _compute_hash(self, path):
+        hasher = hashlib.md5()
+        with open(path, "rb") as f:
+            while chunk := f.read(4096):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    def _to_exe(self, path):
+        path = shutil.which(name)
+        if path == None:
+            return None
+        self.short_names[name] = path
+        hexdigest = self._compute_hash(path)
+        self.exe_hashes[path] = hexdigest
+        return hexdigest
+
+    def _to_filename(self, path):
+        path = pathlib.Path(path)
+        if path.exists():
+            return str(path)
+        return None
+
+
+    @staticmethod
+    def try_get_absolute(command: str):
+        """Return None on failure"""
+        return None
+
+    @staticmethod
+    def try_find_executable(command: str):
+        """Return None on failure"""
+
+global_hasher = FileHasher()
+
+class SystemdService:
 
     class ExecCommand:
 
         def __init__(self, command_line):
             self.command = command_line
-
+            self.hashes = list()
 
         def to_dict(self):
             result = dict()
             result["command"] = self.command
+            result["hashes"] = self.get_paths()
             return result
+
+        def get_paths(self):
+            """Try to find executables inside command"""
+            result = list()
+            for cut_command in cut_command_line(str(self.command)):
+                if hash := global_hasher.get(cut_command):
+                    result.append({'name': cut_command, "hash": hash})
+            return result
+
 
 
     def __init__(self):
@@ -83,7 +178,7 @@ class SystemdService():
         section_lines = get_unit_section(ini_content, "Service")
         results = list()
         for values in section_lines:
-            if values[0] in ["ExecStart", "ExecStartPre", "ExecStartPost"]:
+            if values[0] in ["ExecStart", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop", "ExecStopPost"]:
                 results.append(values[1])
         return results
 
@@ -98,6 +193,9 @@ class SystemdService():
         command_lines = self.parse_cat(result.stdout.decode())
         for command in command_lines:
             self.commands.append(SystemdService.ExecCommand(command))
+
+
+
 
 
 def _call_list_services():
@@ -119,15 +217,26 @@ def main():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Systemd config extractor")
-    parser.add_argument("--no-disabled", action="store_const", default=False, help="Only parse enabled units", const=True, dest="enabled")
-    parser.add_argument("--no-hash", action="store_const", default=True, help="Compute hash for paths", const=False, dest="hash")
+    parser.add_argument(
+        "--no-systemd-disabled",
+        action="store_const",
+        default=True,
+        help="Only parse enabled units",
+        const=False,
+        dest="disabled",
+    )
+    parser.add_argument(
+        "--no-hash",
+        action="store_const",
+        default=True,
+        help="Compute hash for paths",
+        const=False,
+        dest="hash",
+    )
     parser.parse_args()
 
-    service = SystemdService()
-    service.name = "borg.service"
-    service.query_details()
+    #service = SystemdService()
+    #service.name = "cloud-init-hotplugd.service"
+    #service.query_details()
     #print(yaml.dump(service.to_dict()))
     main()
-
-
-
