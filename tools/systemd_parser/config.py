@@ -1,7 +1,11 @@
+#!/usr/bin/env python3
 # TODO: Environment
+# TODO: Fix exec flags
 import argparse
 import hashlib
 import json
+import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -9,6 +13,13 @@ import sys
 
 import yaml
 
+
+global_files = [
+    "/etc/passwd",
+    "/etc/shadow",
+    "/usr/sbin",
+    #"/etc/ssh",
+        ]
 
 def get_unit_section(content, section_name):
     """Return key value pairs from content, that are under [section_name]"""
@@ -68,21 +79,54 @@ def cut_command_line(command: str):
     return parts + command.split(sep=" ")
 
 
+def get_some_bytes(absolute):
+    filename = FileHasher.try_get_absolute(absolute)
+    try:
+        with open(filename, "rb") as f:
+            content = f.read(4096)
+            try:
+                return content.decode('utf-8')
+            except Exception:
+                return "[binary]"
+
+            
+    except Exception as e:
+        return str(e)
+
 
 class FileHasher:
 
     def __init__(self):
         self.short_names = dict()
         self.exe_hashes = dict()
+        self.file_hashes = dict()
 
     def get(self, name):
-        path = shutil.which(name)
-        if path == None:
+        full_path = None
+        hash_target = self.file_hashes
+        # Handle cached
+        if full_p:= self.short_names.get(name):
+            if full_p in self.exe_hashes:
+                return self.exe_hashes[full_p]
+            return self.file_hashes[full_p] or None
+        # Try to resolve name
+        if full_path == None:
+            full_path = FileHasher.try_find_executable(name)
+            hash_target = self.exe_hashes
+        if full_path == None:
+            full_path = FileHasher.try_get_absolute(name)
+
+        if not full_path:
             return None
-        self.short_names[name] = path
-        hexdigest = self._compute_hash(path)
-        self.exe_hashes[path] = hexdigest
+
+
+        self.short_names[name] = full_path
+        hexdigest = self._compute_hash(full_path)
+        # Cache
+        hash_target[full_path] = hexdigest
+
         return hexdigest
+
 
     def _compute_hash(self, path):
         hasher = hashlib.md5()
@@ -90,6 +134,7 @@ class FileHasher:
             while chunk := f.read(4096):
                 hasher.update(chunk)
         return hasher.hexdigest()
+
 
     def _to_exe(self, path):
         path = shutil.which(name)
@@ -110,11 +155,17 @@ class FileHasher:
     @staticmethod
     def try_get_absolute(command: str):
         """Return None on failure"""
-        return None
+        path = pathlib.Path(command)
+        if not path.exists():
+            return None
+        if path.is_dir():
+            return None
+        return str(path.absolute())
 
     @staticmethod
     def try_find_executable(command: str):
         """Return None on failure"""
+        return shutil.which(str(command))
 
 global_hasher = FileHasher()
 
@@ -200,11 +251,10 @@ class SystemdService:
 
 def _call_list_services():
     command = "systemctl --full --no-pager list-unit-files --type=service -o json"
-    result = subprocess.run(command.split(), capture_output=True, timeout=5, check=True)
+    result = subprocess.run(command.split(), capture_output=True, timeout=15, check=True)
     return result.stdout
 
-
-def main():
+def main_services():
     services_json = _call_list_services()
     services_obj = json.loads(services_json)
     services = list()
@@ -212,31 +262,84 @@ def main():
         service = SystemdService.from_dict(service_json)
         service.query_details()
         services.append(service.to_dict())
-    print(yaml.dump(services))
+    return services
+
+def _try_get_path_file(path):
+    result = dict()
+    path = pathlib.Path(path)
+    absolute = str(path.absolute())
+    result["path"] = absolute
+    try:
+        result["size"] = path.stat().st_size
+        result["hash"] = global_hasher.get(absolute) or "None"
+        result["sample"] = get_some_bytes(absolute)
+    except Exception as e:
+        result["error"] = str(e)
+    return result
+
+def _try_get_path_dir(path):
+    result = list()
+    path = pathlib.Path(path)
+    if not path.is_dir():
+        return result
+    for entry in os.walk(path):
+        for fname in entry[2]:
+            pure_path = pathlib.PurePath(entry[0]).joinpath(fname)
+            result.append(_try_get_path_file(str(pure_path)))
+    return result
+
+
+def _try_get_path(path):
+    """ Returns array of objects"""
+    path = pathlib.Path(path)
+    if not path.exists():
+        return list()
+    if path.is_dir():
+        return _try_get_path_dir(path)
+    return [_try_get_path_file(path)]
+
+
+def main_files():
+    results = list()
+    for path in global_files:
+        results += _try_get_path(path)
+    return results
+
+
+def main(args):
+    result = dict()
+    if args.systemd:
+        services = main_services()
+        result["systemd"] = services
+
+    if args.files:
+        result["files"] = main_files()
+    print(yaml.dump(result))
+
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Systemd config extractor")
     parser.add_argument(
-        "--no-systemd-disabled",
+        "--no-systemd",
         action="store_const",
         default=True,
-        help="Only parse enabled units",
+        help="Disable systemd collection",
         const=False,
-        dest="disabled",
+        dest="systemd",
     )
     parser.add_argument(
-        "--no-hash",
+        "--no-files",
         action="store_const",
         default=True,
-        help="Compute hash for paths",
+        help="Disable file enumeration",
         const=False,
-        dest="hash",
+        dest="files",
     )
-    parser.parse_args()
+    args = parser.parse_args()
 
     #service = SystemdService()
     #service.name = "cloud-init-hotplugd.service"
     #service.query_details()
     #print(yaml.dump(service.to_dict()))
-    main()
+    main(args)
