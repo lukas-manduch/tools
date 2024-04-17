@@ -17,8 +17,54 @@ import yaml
 global_files = [
     "/etc/passwd",
     "/etc/shadow",
-    "/usr/sbin",
-    #"/etc/ssh",
+    "/etc/pam.d",
+    "/etc/pam.conf",
+    "/etc/ssh",
+    "/sbin/init/",
+    "/lib/systemd/systemd",
+    "/lib/systemd/systemd-ac-power",
+    "/lib/systemd/systemd-backlight",
+    "/lib/systemd/systemd-binfmt",
+    "/lib/systemd/systemd-bless-boot",
+    "/lib/systemd/systemd-boot-check-no-failures",
+    "/lib/systemd/systemd-cgroups-agent",
+    "/lib/systemd/systemd-cryptsetup",
+    "/lib/systemd/systemd-fsck",
+    "/lib/systemd/systemd-fsckd",
+    "/lib/systemd/systemd-growfs",
+    "/lib/systemd/systemd-hibernate-resume",
+    "/lib/systemd/systemd-hostnamed",
+    "/lib/systemd/systemd-initctl",
+    "/lib/systemd/systemd-journald",
+    "/lib/systemd/systemd-localed",
+    "/lib/systemd/systemd-logind",
+    "/lib/systemd/systemd-makefs",
+    "/lib/systemd/systemd-modules-load",
+    "/lib/systemd/systemd-network-generator",
+    "/lib/systemd/systemd-networkd",
+    "/lib/systemd/systemd-networkd-wait-online",
+    "/lib/systemd/systemd-pstore",
+    "/lib/systemd/systemd-quotacheck",
+    "/lib/systemd/systemd-random-seed",
+    "/lib/systemd/systemd-remount-fs",
+    "/lib/systemd/systemd-reply-password",
+    "/lib/systemd/systemd-resolved",
+    "/lib/systemd/systemd-rfkill",
+    "/lib/systemd/systemd-shutdown",
+    "/lib/systemd/systemd-sleep",
+    "/lib/systemd/systemd-socket-proxyd",
+    "/lib/systemd/systemd-sulogin-shell",
+    "/lib/systemd/systemd-sysctl",
+    "/lib/systemd/systemd-sysv-install",
+    "/lib/systemd/systemd-time-wait-sync",
+    "/lib/systemd/systemd-timedated",
+    "/lib/systemd/systemd-udevd",
+    "/lib/systemd/systemd-update-utmp",
+    "/lib/systemd/systemd-user-runtime-dir",
+    "/lib/systemd/systemd-user-sessions",
+    "/lib/systemd/systemd-veritysetup",
+    "/lib/systemd/systemd-volatile-root",
+    "/lib/systemd/systemd-xdg-autostart-condition",
         ]
 
 def get_unit_section(content, section_name):
@@ -57,6 +103,10 @@ def _cut_quotes(line, quote):
         return None
     return line[position+1: pos2], line[pos2+1:]
 
+def _try_remove_systemd_specials(path):
+    """Remove special systemd symbols that are before exec commands"""
+    return str(path).lstrip("-+!:@")
+
 
 def cut_command_line(command: str):
     # First handle quotes
@@ -67,29 +117,37 @@ def cut_command_line(command: str):
         results = _cut_quotes(results[1], '"')
         if results == None:
             break
-        parts.append(results[0])
+        piece = results[0]
+        parts.append(piece)
     # Single quotes
     results = (None, str(command), )
     while True:
         results = _cut_quotes(results[1], "'")
         if results == None:
             break
-        parts.append(results[0])
+        piece = results[0]
+        parts.append(piece)
     # Spaces
-    return parts + command.split(sep=" ")
+    parts += command.split(sep=" ")
+    clean_parts = list()
+
+    for part in parts:
+        clean_part = _try_remove_systemd_specials(part)
+        if part != clean_part:
+            clean_parts.append(clean_part)
+
+    return parts + clean_parts
 
 
 def get_some_bytes(absolute):
     filename = FileHasher.try_get_absolute(absolute)
     try:
         with open(filename, "rb") as f:
-            content = f.read(4096)
+            content = f.read(2048)
             try:
                 return content.decode('utf-8')
             except Exception:
                 return "[binary]"
-
-            
     except Exception as e:
         return str(e)
 
@@ -339,7 +397,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     #service = SystemdService()
-    #service.name = "cloud-init-hotplugd.service"
+    #service.name = "cockpit.service"
     #service.query_details()
     #print(yaml.dump(service.to_dict()))
     main(args)
