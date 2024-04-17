@@ -187,11 +187,14 @@ class FileHasher:
 
 
     def _compute_hash(self, path):
-        hasher = hashlib.md5()
-        with open(path, "rb") as f:
-            while chunk := f.read(4096):
-                hasher.update(chunk)
-        return hasher.hexdigest()
+        try:
+            hasher = hashlib.md5()
+            with open(path, "rb") as f:
+                while chunk := f.read(4096):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+        except Exception:
+            return None
 
 
     def _to_exe(self, path):
@@ -304,9 +307,6 @@ class SystemdService:
             self.commands.append(SystemdService.ExecCommand(command))
 
 
-
-
-
 def _call_list_services():
     command = "systemctl --full --no-pager list-unit-files --type=service -o json"
     result = subprocess.run(command.split(), capture_output=True, timeout=15, check=True)
@@ -395,7 +395,6 @@ if __name__ == "__main__":
         dest="files",
     )
     args = parser.parse_args()
-
     #service = SystemdService()
     #service.name = "cockpit.service"
     #service.query_details()
