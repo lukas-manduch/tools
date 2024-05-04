@@ -1,0 +1,1 @@
+Parser should allocate memory only on stack

@@ -248,7 +248,8 @@ struct context {
 	// This variable represents context, that can be passed with this down
 	// the function call chain.  Each function may read it or replace it
 	// for functions that it will call next.  But after returning, it
-	// should be restored to parents value.
+	// should be restored to parents value.  It is vaguely similar to
+	// golang contexts.
 	void* stage;
 	enum StageType stage_type;
 	// Error handling
@@ -308,50 +309,6 @@ void __debug_print(const char* c) {
 
 	sys_write(0, c, str_size);
 	sys_write(0, "\n", 1);
-}
-
-void print_cstring(const char *str) {
-	u64 i = 0;
-	while(str[i++] != 0) ;
-	sys_write(0, str, i);
-}
-
-void print_expression(const struct ExpressionT* expression) {
-	if (!expression) {
-		print_cstring("[NULL PTR]");
-		return;
-	}
-	switch(expression->expr_type) {
-	case STRING:
-		{
-			u64 size = expression->value_string.size;
-			sys_write(0, "\"", 1);
-			sys_write(0, expression->value_string.content, size);
-			sys_write(0, "\"", 1);
-			break;
-
-		}
-	// case CONS:
-	// 	{
-	// 		sys_write(0, "( ", 2);
-	// 		if (expression->value_list.cell != NULL) {
-	// 			struct ConsCell *curr = expression->value_list.cell;
-	// 			print_expression(curr->car);
-	// 			sys_write(0, " ", 1);
-	// 			print_expression(curr->cdr);
-
-	// 		}
-	// 		sys_write(0, ")", 2);
-	// 		break;
-	// 	}
-	case SYMBOL:
-		{
-			sys_write(0, expression->value_string.content, expression->value_string.size);
-			break;
-		}
-	default:
-		print_cstring("[NOT_IMPLEMENTED]");
-	}
 }
 
 #define DEBUG_ERROR(str) __debug_print(str)
@@ -1806,12 +1763,6 @@ INLINE struct ExpressionT* type_cons_cdr(const struct ExpressionT* cons) {
 	return NULL;
 }
 
-/** See type_cons_car_ast
- */
-INLINE struct AstNode* type_cons_cdr_ast(struct ExpressionT* cons) {
-	return (struct AstNode*)type_cons_cdr(cons);
-}
-
 INLINE void type_cons_set_cdr(struct ExpressionT* cons, void* cdr) {
 	if (type_iscons(cons)) {
 		cons->value_cons.cdr = cdr;
@@ -2967,89 +2918,32 @@ struct ExpressionT** interpreter_get_ret_addr(struct context* ctx) {
 	return exp;
 }
 
-/** Check if given expression is function call.
- *  Returns either TRUE or FALSE.
- */
-i64 interpreter_is_expr_function_call(struct ExpressionT* expr) {
-	if (!type_iscons(expr)) {
-		return FALSE;
-	}
-	struct ExpressionT* first = type_cons_car(expr);
-	if (first && first->expr_type == SYMBOL) {
-		return TRUE;
-	}
-	return FALSE;
+// This function is moved down, so it can see defined builtin functions.
+u64 interpreter_load_builtins(struct context* ctx);
+
+
+
+	// Clean up stack
+
+
 }
 
+STATIC void interpreter_run_recursive(struct context* ctx, struct AstNode* node) {
+	if (type_ast_isfunc(node)) {
+		_interpreter_run_func(ctx, node);
 
-
-void builtin_concat(struct context* ctx);
-void builtin_stdout(struct context* ctx);
-void builtin_read_file(struct context* ctx);
-
-u64 _interpreter_count_expr_nodes_internal(struct ExpressionT* expr) {
-	if (!type_iscons(expr)) {
-		return 0;
 	}
-	struct ExpressionT* car = type_cons_car(expr);
-	if (!type_is_symbol(car)) {
-		DEBUG_ERROR("Parsing some list - unsupported yet");
-		return 0;
-	}
-
-	struct ExpressionT* cons_expr = type_cons_cdr(expr);
-	u64 total_children = 0;
-	while (cons_expr) {
-		total_children += _interpreter_count_expr_nodes_internal(
-			type_cons_car(cons_expr));
-		cons_expr = type_cons_cdr(cons_expr);
-	}
-	return total_children + 1;
-}
-
-u64 interpreter_load_builtins(struct context* ctx) {
-	struct ExpressionT* assoca = type_assoca_alloc(ctx, 6);
-	if (!assoca) {
-		return 1;
-	}
-
-	{
-		char concat[] = {'c', 'o', 'n', 'c', 'a', 't'};
-		u64 ret = type_assoca_insert(
-				assoca, concat, 6, (u64)builtin_concat);
-		if (ret != 0) {
-			return 1;
-		}
-	}
-
-	{
-		char write[] = {'w', 'r', 'i', 't', 'e'};
-		u64 ret = type_assoca_insert(
-				assoca, write, 5, (u64)builtin_stdout);
-		if (ret != 0) {
-			return 1;
-		}
-	}
-
-	{
-		char rf[] = {'r', 'e', 'a', 'd', 'f', 'i', 'l', 'e'};
-		u64 ret = type_assoca_insert(
-				assoca, rf, 8, (u64)builtin_read_file);
-		if (ret != 0) {
-			return 1;
-		}
-	}
-
-	ctx->builtins = assoca;
-	return 0;
 }
 
 /** Execute program, that was already parsed and is saved in context.
  *  This is main function for starting the program (after parsing)
  **/
 int interpreter_execute(struct context* ctx) {
-	if(!ctx->program) {
-		return -1;
+	if(!ctx->program_ast) {
+		return -ERROR_CRITICAL;
+	}
+	if (interpreter_load_builtins(ctx)) {
+		return -ERROR_CRITICAL;
 	}
 
 	//if (interpreter_load_builtins(ctx)) {
@@ -3528,6 +3422,45 @@ void builtin_read_file(struct context* ctx) {
 // ============================
 //   END BUILTINS
 // ============================
+
+
+
+u64 interpreter_load_builtins(struct context* ctx) {
+	struct ExpressionT* assoca = type_assoca_alloc(ctx, 6);
+	if (!assoca) {
+		return 1;
+	}
+
+	{
+		char concat[] = {'c', 'o', 'n', 'c', 'a', 't'};
+		u64 ret = type_assoca_insert(
+				assoca, concat, 6, (u64)builtin_concat);
+		if (ret != 0) {
+			return 1;
+		}
+	}
+
+	{
+		char write[] = {'w', 'r', 'i', 't', 'e'};
+		u64 ret = type_assoca_insert(
+				assoca, write, 5, (u64)builtin_stdout);
+		if (ret != 0) {
+			return 1;
+		}
+	}
+
+	{
+		char rf[] = {'r', 'e', 'a', 'd', 'f', 'i', 'l', 'e'};
+		u64 ret = type_assoca_insert(
+				assoca, rf, 8, (u64)builtin_read_file);
+		if (ret != 0) {
+			return 1;
+		}
+	}
+
+	ctx->builtins = assoca;
+	return 0;
+}
 
 #ifdef TEST
 #include "src/tests.c"
