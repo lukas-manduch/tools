@@ -1,0 +1,5 @@
+(let (( myvar "a" )) 
+  (if (= myvar "" )
+    (puts "Myvar is 0 ")
+    (goto aaa)
+    ))
