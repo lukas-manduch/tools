@@ -101,6 +101,7 @@ enum ErrorCodes {
 	ERROR_AST_CRITICAL              = 35, // Error in implementation / logic
 
 	ERROR_INTERPRETER_STACK_ALLOC   = 64,
+	ERROR_INTERPRETER_GENERAL       = 65,
 };
 
 struct StringExpression {
@@ -263,7 +264,7 @@ struct context {
 
 enum StackTypes {
 	TYPE_STACK_BASE,
-	TYPE_STACK_ARG,
+	TYPE_STACK_VALUE,
 	TYPE_STACK_ARG_COUNT,
 };
 
@@ -273,7 +274,7 @@ struct StackField {
 		// Function argument on stack
 		struct {
 			struct ExpressionT* value;
-		} argument;
+		} value;
 
 		// Current AST node being processed
 		struct {
@@ -281,6 +282,7 @@ struct StackField {
 			struct StackField* previous;
 		} stack_base;
 
+		// How many arguments is pushed below
 		struct {
 			u16 count;
 		} arg_count;
@@ -462,6 +464,10 @@ INLINE void* stack_push_aligned(struct context* ctx, u64 size) {
  */
 INLINE void* global_stack_get_ptr(struct context* ctx) {
 	return &(ctx->stack[ctx->_stack_pointer]);
+}
+
+INLINE void global_stack_set_bp(struct context* ctx, u16 value) {
+	ctx->_base_pointer = value;
 }
 
 /** Push value on stack and return pointer to value
@@ -2016,16 +2022,45 @@ INLINE void type_stackfield_base_init(
 	location->stack_base.previous = previous;
 }
 
-INLINE void type_stackfield_arg_init(
+INLINE int type_stackfield_is_base(struct StackField* addr) {
+	if (addr && addr->type == TYPE_STACK_BASE) {
+		return 1;
+	}
+	return 0;
+}
+
+
+INLINE void type_stackfield_value_init(
 		struct StackField* location, struct ExpressionT* arg) {
-	location->type = TYPE_STACK_ARG;
-	location->argument.value = arg;
+	location->type = TYPE_STACK_VALUE;
+	location->value.value = arg;
+}
+
+INLINE int type_stackfield_is_value(struct StackField* addr) {
+	if (addr && addr->type == TYPE_STACK_VALUE) {
+		return 1;
+	}
+	return 0;
 }
 
 INLINE void type_stackfield_argcount_init(
 		struct StackField* location, u16 arg_count) {
 	location->type = TYPE_STACK_ARG_COUNT;
 	location->arg_count.count = arg_count;
+}
+
+INLINE int type_stackfield_is_argcount(struct StackField* addr) {
+	if (addr && addr->type == TYPE_STACK_ARG_COUNT) {
+		return 1;
+	}
+	return 0;
+}
+
+INLINE u16 type_stackfield_get_argcount(struct StackField* addr) {
+	if (type_stackfield_is_argcount(addr)) {
+		return addr->arg_count.count;
+	}
+	return 0;
 }
 
 // ============================
@@ -2986,6 +3021,7 @@ void* _interpreter_stack_push_base(
 	if (!stack_entry)
 		return NULL;
 	type_stackfield_base_init(stack_entry, node, prev);
+	global_stack_set_bp(ctx, ctx->_stack_pointer);
 	return stack_entry;
 }
 
@@ -2998,8 +3034,16 @@ void* _interpreter_stack_push_arg(struct context* ctx, struct ExpressionT* arg) 
 		global_stack_push_var(ctx, sizeof(struct StackField));
 	if (!stack_entry)
 		return NULL;
-	type_stackfield_arg_init(stack_entry, arg);
+	type_stackfield_value_init(stack_entry, arg);
 	return stack_entry;
+}
+
+/** Push empty return value on stack.
+ * This is called  before function call in order to prepare space.
+ * On error return NULL
+ */
+INLINE void* _interpreter_stack_push_ret(struct context* ctx) {
+	return _interpreter_stack_push_arg(ctx, NULL);
 }
 
 /** Push argument count onto stack.
@@ -3015,15 +3059,51 @@ void* _interpreter_stack_push_arg_count(struct context* ctx, u16 count) {
 	return stack_entry;
 }
 
+/** Get pointer to topmost base */
+struct StackField* _interpreter_get_base(struct context* ctx) {
+	u64 stack_used = STACK_SIZE - ctx->_base_pointer;
+	if (stack_used < sizeof(struct StackField)) {
+		return NULL;
+	}
+	struct StackField* ret =
+		(struct StackField*) (&ctx->stack[ctx->_base_pointer]);
+	if (type_stackfield_is_base(ret)) {
+		return ret;
+	}
+	return NULL;
+}
+
 // This function is moved down, so it can see defined builtin functions.
 u64 interpreter_load_builtins(struct context* ctx);
 
+void builtin_concat(struct context* ctx);
+
+/** Call function from node. Assume that stack is already prepared
+ */
+INLINE int _interpreter_exec_func(struct context* ctx, struct AstNode* node) {
+	builtin_concat(ctx);
+	return 0;
+}
+
+/** Prepare stack for function call.
+ *  1. Push empty space for return value
+ *  2. Push arguments onto stack
+ *  3. Push argument count onto stack
+ *  4. Push function "base" onto stack
+ *  5. Call function
+ */
 INLINE int _interpreter_prepare_func(struct context* ctx, struct AstNode* node) {
 	// TODO: Make space for return value
+	//
+	
+	_interpreter_stack_push_ret(ctx);
 
 	// First build arguments
 	u16 argcount = type_ast_func_get_argcount(node);
 	struct StackField* stack_top = NULL;
+	struct StackField* base_pointer = // Get bp to previous function
+		_interpreter_get_base(ctx);
+	// Push arguments
 	for (int i = 0; i < argcount; i++) {
 		struct AstNode* arg = type_ast_func_get_arg(node, i);
 		if (type_ast_isval(arg)) {
@@ -3044,12 +3124,24 @@ INLINE int _interpreter_prepare_func(struct context* ctx, struct AstNode* node) 
 		return 1;
 	}
 
+	// Push base
+	stack_top = _interpreter_stack_push_base(ctx, node, base_pointer);
+
 	// Call actual function
+	if (_interpreter_exec_func(ctx, node)) { // Something went wrong
+		// Global error is set inside _interpreter_exec_func
+		return 1;
+	}
 
 	// Clean up stack
 
 
 	return 0;
+}
+
+/** Set return value of currently executing function to expr
+ */
+void interpreter_return_value(struct context* ctx, struct ExpressionT* expr) {
 }
 
 STATIC void interpreter_run_recursive(struct context* ctx, struct AstNode* node) {
@@ -3059,6 +3151,69 @@ STATIC void interpreter_run_recursive(struct context* ctx, struct AstNode* node)
 	}
 }
 
+/** Get number of pushed arguments on stack for current function.
+ *  Returns 0 on error (Also on 0 arguments)
+ */
+INLINE u16 interpreter_get_arg_count(struct context* ctx) {
+	struct StackField* base = _interpreter_get_base(ctx);
+	if (!base) {
+		return 0;
+	}
+
+	char* addr = (char*)base;
+	addr += sizeof(struct StackField);
+	base = (struct StackField*)addr;
+
+	if (!type_stackfield_is_argcount(base)) {
+		// This branch might be unnecessary
+		DEBUG_ERROR("Error: Argcount field missing");
+		return 0;
+	}
+	return type_stackfield_get_argcount(base);
+}
+
+// TODO: struct StackField* _interpreter_get_ret_field(struct StackField* base)
+// TODO: struct StackField* _interpreter_get_argcount_field(struct StackField* base)
+// TODO: struct StackField* _interpreter_get_argument_field(struct StackField* base, u16 position)
+// TODO: struct ExpressionT* interpreter_get_argument(struct context* ctx)
+
+/** Get pointer to struct ExpressionT containing argument.
+ *  First argument to this function must be pointer to base of function, for
+ *  which arguments will be retrieved
+ *
+ *  Position is indexed from 1.
+ *
+ *  Return NULL on failure
+ */
+struct ExpressionT* interpreter_get_argument(struct StackField* base, u16 position) {
+	if (!type_stackfield_is_base(base)) {
+		return NULL;
+	}
+	// Get argcount
+	char* addr = (char*)base;
+	addr += sizeof(struct StackField);
+	struct StackField* argcount = (struct StackField*)addr;
+	if (!type_stackfield_is_argcount(argcount)) {
+		DEBUG_ERROR("interpreter_get_argument - broken stack");
+		return NULL;
+	}
+	// Get argument
+	struct StackField* argp = argcount;
+	u16 count = argcount->arg_count.count;
+	if (position >= count) {
+		return NULL;
+	}
+	// -- Find how many args down the stack is target
+	for (int i = 0; i < count - position + 1; i++) {
+		argp++;
+	}
+	if (!type_stackfield_is_value(argp)) {
+		DEBUG_ERROR("interpreter_get_argument - broken stack 2");
+		return NULL;
+	}
+	return argp->value.value;
+}
+
 /** Execute program, that was already parsed and is saved in context.
  *  This is main function for starting the program (after parsing)
  **/
@@ -3066,10 +3221,10 @@ int interpreter_execute(struct context* ctx) {
 	if(!ctx->program_ast) {
 		return -ERROR_CRITICAL;
 	}
-	if (interpreter_load_builtins(ctx)) {
-		return -ERROR_CRITICAL;
-	}
-
+//	if (interpreter_load_builtins(ctx)) {
+//		return -ERROR_CRITICAL;
+//	}
+//
 	interpreter_run_recursive(ctx, ctx->program_ast);
 
 	return 0;
@@ -3454,25 +3609,34 @@ STATIC void debug_print_ast(struct AstNode* ast, u32 depth) {
 // ============================
 
 // Builtins are functions, that are called directly from lisp, e.g. + - concat.
-// These functions, cannot be called from C directly, because they work with
-// interpreter's stack
+// These functions, should not be called from C directly, because they expect
+// arguments on interpreter stack
 
 
 void builtin_concat(struct context* ctx) {
-//	u64 argcount = interpreter_get_arg_count(ctx);
-//	if (argcount != 2) {
-//		DEBUG_ERROR("Wrong arg count, fixme message");
-//		return;
-//	}
-//	struct ExpressionT *arg1, *arg2;
-//	arg1 = interpreter_get_arg(ctx, 1);
-//	arg2 = interpreter_get_arg(ctx, 2);
-//	if (!type_isstring(arg1) || !type_isstring(arg2)) {
-//		DEBUG_ERROR("Fail concat, bad argument types");
-//		return;
-//	}
-//	u64 final_size =
-//		type_string_get_length(arg1) + type_string_get_length(arg2);
+	DEBUG_ERROR("Concat");
+	u16 argcount = interpreter_get_arg_count(ctx);
+	if (argcount != 2) {
+		c_printf1("Argcount is %d\n", (void*)(u64)argcount);
+		DEBUG_ERROR("Wrong arg count, fixme message");
+		return;
+	}
+	struct ExpressionT *arg1, *arg2;
+	struct StackField* base = _interpreter_get_base(ctx);
+	// TODO: _interpreter_get_argument should take base and this one ctx
+	arg1 = interpreter_get_argument(base, 1);
+	arg2 = interpreter_get_argument(base, 2);
+	if (!type_isstring(arg1) || !type_isstring(arg2)) {
+		DEBUG_ERROR("Fail concat, bad argument types");
+		return;
+	} else {
+		u32 length = type_string_get_length(arg1);
+		c_printf1("String length is %d\n", (void*)(u64)length);
+
+	}
+
+	u64 final_size =
+		type_string_get_length(arg1) + type_string_get_length(arg2);
 //	struct ExpressionT* result = type_string_alloc(ctx, final_size);
 //	if (!result) {
 //		DEBUG_ERROR("Fail here, cannot allocate fixme");
@@ -3488,7 +3652,7 @@ void builtin_concat(struct context* ctx) {
 //	*ret_place = result;
 }
 
-void builtin_stdout(struct context* ctx) {
+// void builtin_stdout(struct context* ctx) {
 //	u64 argcount = interpreter_get_arg_count(ctx);
 //	if (argcount != 1) {
 //		DEBUG_ERROR("Wrong arg count");
@@ -3503,9 +3667,9 @@ void builtin_stdout(struct context* ctx) {
 //	sys_write(1, type_string_getp(arg1), type_string_get_length(arg1));
 //	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
 //	*ret_place = (void*)1;
-}
+// }
 
-void builtin_read_file(struct context* ctx) {
+// void builtin_read_file(struct context* ctx) {
 //	u64 argcount = interpreter_get_arg_count(ctx);
 //	if (argcount != 1) {
 //		DEBUG_ERROR("Wrong arg count");
@@ -3540,7 +3704,7 @@ void builtin_read_file(struct context* ctx) {
 //
 //	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
 //	*ret_place = (void*)result_string;
-}
+// }
 
 // ============================
 //   END BUILTINS
@@ -3548,42 +3712,42 @@ void builtin_read_file(struct context* ctx) {
 
 
 
-u64 interpreter_load_builtins(struct context* ctx) {
-	struct ExpressionT* assoca = type_assoca_alloc(ctx, 6);
-	if (!assoca) {
-		return 1;
-	}
-
-	{
-		char concat[] = {'c', 'o', 'n', 'c', 'a', 't'};
-		u64 ret = type_assoca_insert(
-				assoca, concat, 6, (u64)builtin_concat);
-		if (ret != 0) {
-			return 1;
-		}
-	}
-
-	{
-		char write[] = {'w', 'r', 'i', 't', 'e'};
-		u64 ret = type_assoca_insert(
-				assoca, write, 5, (u64)builtin_stdout);
-		if (ret != 0) {
-			return 1;
-		}
-	}
-
-	{
-		char rf[] = {'r', 'e', 'a', 'd', 'f', 'i', 'l', 'e'};
-		u64 ret = type_assoca_insert(
-				assoca, rf, 8, (u64)builtin_read_file);
-		if (ret != 0) {
-			return 1;
-		}
-	}
-
-	ctx->builtins = assoca;
-	return 0;
-}
+// u64 interpreter_load_builtins(struct context* ctx) {
+// 	struct ExpressionT* assoca = type_assoca_alloc(ctx, 6);
+// 	if (!assoca) {
+// 		return 1;
+// 	}
+// 
+// 	{
+// 		char concat[] = {'c', 'o', 'n', 'c', 'a', 't'};
+// 		u64 ret = type_assoca_insert(
+// 				assoca, concat, 6, (u64)builtin_concat);
+// 		if (ret != 0) {
+// 			return 1;
+// 		}
+// 	}
+// 
+// 	{
+// 		char write[] = {'w', 'r', 'i', 't', 'e'};
+// 		u64 ret = type_assoca_insert(
+// 				assoca, write, 5, (u64)builtin_stdout);
+// 		if (ret != 0) {
+// 			return 1;
+// 		}
+// 	}
+// 
+// 	{
+// 		char rf[] = {'r', 'e', 'a', 'd', 'f', 'i', 'l', 'e'};
+// 		u64 ret = type_assoca_insert(
+// 				assoca, rf, 8, (u64)builtin_read_file);
+// 		if (ret != 0) {
+// 			return 1;
+// 		}
+// 	}
+// 
+// 	ctx->builtins = assoca;
+// 	return 0;
+// }
 
 #ifdef TEST
 #include "src/tests.c"
