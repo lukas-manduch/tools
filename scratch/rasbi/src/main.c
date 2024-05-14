@@ -154,6 +154,10 @@ typedef struct ExpressionT {
  * used outside. This behavior is kinda like clisp's behavior, except that for
  * now having multiple declarations in one let block is not supported. But this
  * can be circumvented by nesting let blocks.
+ *
+ * AST_PROGN - Similar to common lisp progn, it is a block that may contain
+ * multiple function calls. Result of the whole block is value returned from
+ * last called function
  */
 enum AstSymbol {
 	AST_IF,
@@ -466,8 +470,45 @@ INLINE void* global_stack_get_ptr(struct context* ctx) {
 	return &(ctx->stack[ctx->_stack_pointer]);
 }
 
+/** Set stack pointer to point to same thing as PTR.
+ *  Note: this doesn't mean that stack_pointer == ptr, because stack_pointer is
+ *  internally only relative value
+ *
+ *  On success returns 0
+ *  If ptr is invalid, returns 1
+ */
+INLINE int global_stack_set_pptr(struct context* ctx, void* ptr) {
+	if ((char*)ptr < ctx->stack || (char*)ptr > &(ctx->stack[STACK_SIZE])) {
+		return 1;
+	}
+	u64 pointer_value = (u64)ptr - (u64)ctx->stack;
+	ctx->_stack_pointer = (u16)pointer_value;
+	return 0;
+}
+
+/** Set global base pointer to VALUE */
 INLINE void global_stack_set_bp(struct context* ctx, u16 value) {
 	ctx->_base_pointer = value;
+}
+
+/** Set global base pointer according to PTR.
+ *  PTR must point to stack area.
+ *  If PTR is NULL, pointer is set to start of the stack
+ *  Returns 0 on success
+ *  Returns 1 on failure
+ */
+INLINE int global_stack_set_bpp(struct context* ctx, void* ptr) {
+	// TODO : NULL branch may be unnecessary
+	if (ptr == NULL) {
+		ctx->_base_pointer = STACK_SIZE;
+		return 0;
+	}
+	if ((char*)ptr < ctx->stack || (char*)ptr > &(ctx->stack[STACK_SIZE])) {
+		return 1;
+	}
+	u64 pointer_value = (u64)ptr - (u64)ctx->stack;
+	ctx->_base_pointer = (u16)pointer_value;
+	return 0;
 }
 
 /** Push value on stack and return pointer to value
@@ -2029,7 +2070,6 @@ INLINE int type_stackfield_is_base(struct StackField* addr) {
 	return 0;
 }
 
-
 INLINE void type_stackfield_value_init(
 		struct StackField* location, struct ExpressionT* arg) {
 	location->type = TYPE_STACK_VALUE;
@@ -2040,6 +2080,19 @@ INLINE int type_stackfield_is_value(struct StackField* addr) {
 	if (addr && addr->type == TYPE_STACK_VALUE) {
 		return 1;
 	}
+	return 0;
+}
+
+/** Set StackField value to VALUE.
+ *  Return 0 on success
+ *  Return 1 on failure
+ */
+INLINE int type_stackfield_set_value(
+		struct StackField* addr, struct ExpressionT* value) {
+	if (!type_stackfield_is_value(addr)) {
+		return 1;
+	}
+	addr->value.value = value;
 	return 0;
 }
 
@@ -3004,6 +3057,12 @@ error:
 //   END PARSERS
 // ============================
 
+// TODO: Delete me
+void builtin_concat(struct context* ctx);
+void c_printf0(const char* format_string);
+void c_printf1(const char* format_string, void* arg1);
+void debug_to_cstring(struct ExpressionT* src, char* dest, u32 max_size);
+
 // ============================
 //   INTERPRETER
 // ============================
@@ -3016,7 +3075,7 @@ void* _interpreter_stack_push_base(
 		struct context* ctx,
 		struct AstNode* node,
 		struct StackField* prev) {
-	struct StackField* stack_entry = 
+	struct StackField* stack_entry =
 		global_stack_push_var(ctx, sizeof(struct StackField));
 	if (!stack_entry)
 		return NULL;
@@ -3030,7 +3089,7 @@ void* _interpreter_stack_push_base(
  *  Returns NULL on failure
  */
 void* _interpreter_stack_push_arg(struct context* ctx, struct ExpressionT* arg) {
-	struct StackField* stack_entry = 
+	struct StackField* stack_entry =
 		global_stack_push_var(ctx, sizeof(struct StackField));
 	if (!stack_entry)
 		return NULL;
@@ -3051,7 +3110,7 @@ INLINE void* _interpreter_stack_push_ret(struct context* ctx) {
  *  Returns NULL on failure
  */
 void* _interpreter_stack_push_arg_count(struct context* ctx, u16 count) {
-	struct StackField* stack_entry = 
+	struct StackField* stack_entry =
 		global_stack_push_var(ctx, sizeof(struct StackField));
 	if (!stack_entry)
 		return NULL;
@@ -3073,10 +3132,69 @@ struct StackField* _interpreter_get_base(struct context* ctx) {
 	return NULL;
 }
 
+struct StackField* _interpreter_get_previus_base(struct StackField* base) {
+	if (!type_stackfield_is_base(base))
+		return NULL;
+	return base->stack_base.previous;
+}
+
+/** Given function base return return StackField */
+struct StackField* _interpreter_get_ret_field(struct StackField* base) {
+	if (!type_stackfield_is_base(base)) {
+		return NULL;
+	}
+	base++; // Now it is argcount
+	if (!type_stackfield_is_argcount(base)) {
+		return NULL;
+	}
+	u16 arg_count = base->arg_count.count;
+	arg_count++; // We need to skip also argcount field
+	for (int i = 0; i < arg_count; i++) {
+		base++;
+	}
+	if (!type_stackfield_is_value(base)) {
+		return NULL;
+	}
+	return base;
+}
+
+/** Pop current function with all it's arguments */
+struct StackField* _interpreter_pop_base(struct context* ctx) {
+	struct StackField* top_base = _interpreter_get_base(ctx);
+	if (!top_base) {
+		return NULL;
+	}
+	// TODO: Delete
+	struct StackField *return_value = _interpreter_get_ret_field(top_base);
+	if (!return_value) {
+		c_printf0("Return NULL\n");
+	} else {
+		char buffer[300];
+		debug_to_cstring(return_value->value.value, buffer, 300);
+		c_printf1("Return %s\n", buffer);
+	}
+
+	// ------------
+
+	struct StackField* previous_base =
+		_interpreter_get_previus_base(top_base);
+	if (global_stack_set_bpp(ctx, previous_base)) {
+		DEBUG_ERROR("_interpreter_pop_base - broken stack");
+		return NULL;
+	}
+
+	return_value++;
+	if (global_stack_set_pptr(ctx, return_value)) {
+		DEBUG_ERROR("_interpreter_pop_base - broken stack 2");
+		return NULL;
+	}
+
+
+	return previous_base;
+}
+
 // This function is moved down, so it can see defined builtin functions.
 u64 interpreter_load_builtins(struct context* ctx);
-
-void builtin_concat(struct context* ctx);
 
 /** Call function from node. Assume that stack is already prepared
  */
@@ -3093,15 +3211,13 @@ INLINE int _interpreter_exec_func(struct context* ctx, struct AstNode* node) {
  *  5. Call function
  */
 INLINE int _interpreter_prepare_func(struct context* ctx, struct AstNode* node) {
-	// TODO: Make space for return value
-	//
-	
+	// Make space for return value
 	_interpreter_stack_push_ret(ctx);
 
 	// First build arguments
 	u16 argcount = type_ast_func_get_argcount(node);
 	struct StackField* stack_top = NULL;
-	struct StackField* base_pointer = // Get bp to previous function
+	struct StackField* old_base = // Get bp to previous function
 		_interpreter_get_base(ctx);
 	// Push arguments
 	for (int i = 0; i < argcount; i++) {
@@ -3113,8 +3229,22 @@ INLINE int _interpreter_prepare_func(struct context* ctx, struct AstNode* node) 
 				global_set_error_interpreter_stack(ctx);
 				return 1;
 			}
+		} else if (type_ast_isfunc(arg)) {  // TODO : Handle more generic
+			int subroutine_ret =
+				_interpreter_prepare_func(ctx, arg);
+			if (subroutine_ret) {
+				// Global error will be already set
+				return 1;
+			}
+			// Stack is now reset, but return value is still there.
+			// So let's just move stack up
+			if (!global_stack_push_var(ctx, sizeof(struct StackField))) {
+				global_set_error_interpreter_stack(ctx);
+				return 1;
+			}
 		} else {
-			// TODO: Call subroutine
+			global_set_error(ctx, ERROR_CRITICAL);
+			return 1;
 		}
 	}
 	// Push argcount
@@ -3125,7 +3255,12 @@ INLINE int _interpreter_prepare_func(struct context* ctx, struct AstNode* node) 
 	}
 
 	// Push base
-	stack_top = _interpreter_stack_push_base(ctx, node, base_pointer);
+	struct StackField* new_base = _interpreter_stack_push_base(ctx, node, old_base);
+
+	if (!new_base) {
+		global_set_error_interpreter_stack(ctx);
+		return 1;
+	}
 
 	// Call actual function
 	if (_interpreter_exec_func(ctx, node)) { // Something went wrong
@@ -3134,14 +3269,29 @@ INLINE int _interpreter_prepare_func(struct context* ctx, struct AstNode* node) 
 	}
 
 	// Clean up stack
-
+	_interpreter_pop_base(ctx);
 
 	return 0;
 }
 
+
 /** Set return value of currently executing function to expr
  */
 void interpreter_return_value(struct context* ctx, struct ExpressionT* expr) {
+	struct StackField* base = _interpreter_get_base(ctx);
+	if (!base) {
+		DEBUG_ERROR("interpreter_return_value - broken stack");
+		return;
+	}
+	struct StackField* ret_field = _interpreter_get_ret_field(base);
+	if (!ret_field) {
+		DEBUG_ERROR("interpreter_return_value - broken stack 2");
+		return;
+	}
+	if (type_stackfield_set_value(ret_field, expr)) {
+		DEBUG_ERROR("interpreter_return_value - broken stack 3");
+		return;
+	}
 }
 
 STATIC void interpreter_run_recursive(struct context* ctx, struct AstNode* node) {
@@ -3172,7 +3322,6 @@ INLINE u16 interpreter_get_arg_count(struct context* ctx) {
 	return type_stackfield_get_argcount(base);
 }
 
-// TODO: struct StackField* _interpreter_get_ret_field(struct StackField* base)
 // TODO: struct StackField* _interpreter_get_argcount_field(struct StackField* base)
 // TODO: struct StackField* _interpreter_get_argument_field(struct StackField* base, u16 position)
 // TODO: struct ExpressionT* interpreter_get_argument(struct context* ctx)
@@ -3200,7 +3349,7 @@ struct ExpressionT* interpreter_get_argument(struct StackField* base, u16 positi
 	// Get argument
 	struct StackField* argp = argcount;
 	u16 count = argcount->arg_count.count;
-	if (position >= count) {
+	if (position > count) {
 		return NULL;
 	}
 	// -- Find how many args down the stack is target
@@ -3632,24 +3781,22 @@ void builtin_concat(struct context* ctx) {
 	} else {
 		u32 length = type_string_get_length(arg1);
 		c_printf1("String length is %d\n", (void*)(u64)length);
-
 	}
 
 	u64 final_size =
 		type_string_get_length(arg1) + type_string_get_length(arg2);
-//	struct ExpressionT* result = type_string_alloc(ctx, final_size);
-//	if (!result) {
-//		DEBUG_ERROR("Fail here, cannot allocate fixme");
-//		return;
-//	}
-//	char *destp = type_string_getp(result);
-//	c_strcpy_s(destp, type_string_get_length(arg1), type_string_getp(arg1));
-//
-//	c_strcpy_s(destp + type_string_get_length(arg1),
-//			type_string_get_length(arg2), type_string_getp(arg2));
-//
-//	struct ExpressionT** ret_place = interpreter_get_ret_addr(ctx);
-//	*ret_place = result;
+	struct ExpressionT* result = type_string_alloc(ctx, final_size);
+	if (!result) {
+		DEBUG_ERROR("Fail here, cannot allocate fixme");
+		return;
+	}
+	char *destp = type_string_getp(result);
+	c_strcpy_s(destp, type_string_get_length(arg1), type_string_getp(arg1));
+
+	c_strcpy_s(destp + type_string_get_length(arg1),
+			type_string_get_length(arg2), type_string_getp(arg2));
+
+	interpreter_return_value(ctx, result);
 }
 
 // void builtin_stdout(struct context* ctx) {
@@ -3717,7 +3864,7 @@ void builtin_concat(struct context* ctx) {
 // 	if (!assoca) {
 // 		return 1;
 // 	}
-// 
+//
 // 	{
 // 		char concat[] = {'c', 'o', 'n', 'c', 'a', 't'};
 // 		u64 ret = type_assoca_insert(
@@ -3726,7 +3873,7 @@ void builtin_concat(struct context* ctx) {
 // 			return 1;
 // 		}
 // 	}
-// 
+//
 // 	{
 // 		char write[] = {'w', 'r', 'i', 't', 'e'};
 // 		u64 ret = type_assoca_insert(
@@ -3735,7 +3882,7 @@ void builtin_concat(struct context* ctx) {
 // 			return 1;
 // 		}
 // 	}
-// 
+//
 // 	{
 // 		char rf[] = {'r', 'e', 'a', 'd', 'f', 'i', 'l', 'e'};
 // 		u64 ret = type_assoca_insert(
@@ -3744,7 +3891,7 @@ void builtin_concat(struct context* ctx) {
 // 			return 1;
 // 		}
 // 	}
-// 
+//
 // 	ctx->builtins = assoca;
 // 	return 0;
 // }
