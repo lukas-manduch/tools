@@ -71,6 +71,7 @@ enum ExpressionType {
 	TYPE_STRING   = 1 << 6,
 	TYPE_ARRAY    = 1 << 7,
 	TYPE_NUMBER   = 1 << 8,
+	TYPE_NIL      = 1 << 9,
 };
 
 /* Stage types in struct context  */
@@ -174,9 +175,9 @@ struct AstNode {
 	union {
 		// AST_IF
 		struct {
-			void* condition;
-			void* body_true;
-			void* body_false;
+			struct AstNode* condition;
+			struct AstNode* body_true;
+			struct AstNode* body_false;
 		} ast_if;
 
 		// AST_FUNC
@@ -252,6 +253,7 @@ struct context {
 	//struct ExpressionT* parent_table; // (mem) Function call graph
 	//struct ExpressionT* return_values; // (mem) Return values from funtion graph
 	struct ExpressionT* builtins; // (assoca) Builtin functions
+	struct ExpressionT nil;
 
 	// This variable represents context, that can be passed with this down
 	// the function call chain.  Each function may read it or replace it
@@ -445,6 +447,7 @@ void init_context(struct context* ctx) {
 	ctx->builtins = NULL;
 	ctx->error_code = 0;
 	ctx->stage = (void*)0;
+	ctx->nil.expr_type = TYPE_NIL;
 }
 
 LOCAL void* global_stack_push_var(struct context* ctx, u64 size) {
@@ -557,6 +560,10 @@ INLINE void global_set_error(struct context* ctx, enum ErrorCodes code) {
 	ctx->error_code = code;
 }
 
+INLINE void global_set_error_critical(struct context* ctx) {
+	global_set_error(ctx, ERROR_CRITICAL);
+}
+
 INLINE void global_set_error_parser_oom(struct context* ctx) {
 	global_set_error(ctx, ERROR_PARSER_OOM);
 }
@@ -567,6 +574,10 @@ INLINE void global_set_error_oom(struct context* ctx) {
 
 INLINE void global_set_error_interpreter_stack(struct context* ctx) {
 	global_set_error(ctx, ERROR_INTERPRETER_STACK_ALLOC);
+}
+
+INLINE void global_set_error_interpreter_general(struct context* ctx) {
+	global_set_error(ctx, ERROR_INTERPRETER_GENERAL);
 }
 
 void global_error_syntax(struct context* ctx, struct ExpressionT* _e) {
@@ -686,6 +697,9 @@ INLINE enum StageType global_get_stage_type(struct context* ctx) {
 	return 0;
 }
 
+INLINE struct ExpressionT* global_get_nil(struct context* ctx) {
+	return &(ctx->nil);
+}
 
 // ============================
 //   END GLOBAL
@@ -1858,6 +1872,36 @@ INLINE void type_cons_set_cdr(struct ExpressionT* cons, void* cdr) {
 	}
 }
 
+// ------ EXOTIC --------
+//
+// Functions not belonging to any particular type
+
+/** Convert ExpressionT to bool value.
+ *  Returns either 0 or 1
+ */
+STATIC int type_to_bool(struct ExpressionT* expr) {
+	if (!expr) {
+		return 0;
+	} else if (type_isstring(expr)) {
+		return type_string_get_length(expr) > 0;
+	} else if (type_isnumber(expr)) {
+		return type_number_get_value(expr) != 0;
+	}
+	return 0;
+}
+
+/** Check if type is of type nil.
+ *
+ *  Return 1 if true
+ *  Return 0 if false
+ */
+INLINE int type_isnil(struct ExpressionT* expr) {
+	if (expr && expr->expr_type == TYPE_NIL) {
+		return 1;
+	}
+	return 0;
+}
+
 // ------- AST -----------
 
 // Ast is type used by parser to represent building blocks of program. E.g.
@@ -1939,6 +1983,36 @@ struct AstNode* type_ast_alloc_if(struct context* ctx) {
 	node->ast_if.body_true = NULL;
 	node->ast_if.body_false = NULL;
 	return node;
+}
+
+/** Get AST body (false branch) node from if node.
+ *  Returns NULL on error.
+ */
+struct AstNode* type_ast_if_get_false(struct AstNode* node) {
+	if (!type_ast_isif(node)) {
+		return NULL;
+	}
+	return node->ast_if.body_false;
+}
+
+/** Get AST body (true branch) node from if node.
+ *  Returns NULL on error.
+ */
+struct AstNode* type_ast_if_get_true(struct AstNode* node) {
+	if (!type_ast_isif(node)) {
+		return NULL;
+	}
+	return node->ast_if.body_true;
+}
+
+/** Get AST condition node from if node.
+ *  Returns NULL on error.
+ */
+struct AstNode* type_ast_if_get_condition(struct AstNode* node) {
+	if (!type_ast_isif(node)) {
+		return NULL;
+	}
+	return node->ast_if.condition;
 }
 
 // AST_VALUE
@@ -2094,6 +2168,14 @@ INLINE int type_stackfield_set_value(
 	}
 	addr->value.value = value;
 	return 0;
+}
+
+/** Return ExpressionT* from StackField */
+INLINE struct ExpressionT* type_stackfield_value_get(struct StackField* addr) {
+	if (!type_stackfield_is_value(addr)) {
+		return NULL;
+	}
+	return addr->value.value;
 }
 
 INLINE void type_stackfield_argcount_init(
@@ -3067,6 +3149,8 @@ void debug_to_cstring(struct ExpressionT* src, char* dest, u32 max_size);
 //   INTERPRETER
 // ============================
 
+STATIC int interpreter_run_recursive(struct context* ctx, struct AstNode* node);
+
 /** Push StackField frame BASE onto stack
  *  Returns pointer to new structure
  *  Returns NULL on failure
@@ -3118,6 +3202,35 @@ void* _interpreter_stack_push_arg_count(struct context* ctx, u16 count) {
 	return stack_entry;
 }
 
+/** Return pointer to value returned from last function call.
+ *  Returns NULL on failure
+ */
+INLINE struct StackField* _interpreter_stack_get_top_value(struct context* ctx) {
+	struct StackField* top = global_stack_get_ptr(ctx);
+	if (!type_stackfield_is_value(top)) {
+		return NULL;
+	}
+	return top;
+}
+
+/** Remove value from top of the stack.
+ *  This function should be responsible for memory cleanup.
+ *
+ *  Return 0 on success
+ *  Return 1 on failure
+ */
+LOCAL int _interpreter_stack_delete_top_value(struct context* ctx) {
+	struct StackField *old_top = _interpreter_stack_get_top_value(ctx);
+	if (!old_top) {
+		return 1;
+	}
+	old_top++;
+	if(global_stack_set_pptr(ctx, old_top)) {
+		return 1;
+	}
+	return 0;
+}
+
 /** Get pointer to topmost base */
 struct StackField* _interpreter_get_base(struct context* ctx) {
 	u64 stack_used = STACK_SIZE - ctx->_base_pointer;
@@ -3158,11 +3271,18 @@ struct StackField* _interpreter_get_ret_field(struct StackField* base) {
 	return base;
 }
 
-/** Pop current function with all it's arguments */
-struct StackField* _interpreter_pop_base(struct context* ctx) {
+/** Pop currently function from stack and leave stack pointer pointing to it's
+ *  return value.
+ *
+ *  Memory from local variables is freed. (Not implemented yet)
+ *
+ *  Returns 0 on success
+ *  Returns 1 on failure
+ */
+int _interpreter_pop_base(struct context* ctx) {
 	struct StackField* top_base = _interpreter_get_base(ctx);
 	if (!top_base) {
-		return NULL;
+		return 1;
 	}
 	// TODO: Delete
 	struct StackField *return_value = _interpreter_get_ret_field(top_base);
@@ -3180,17 +3300,16 @@ struct StackField* _interpreter_pop_base(struct context* ctx) {
 		_interpreter_get_previus_base(top_base);
 	if (global_stack_set_bpp(ctx, previous_base)) {
 		DEBUG_ERROR("_interpreter_pop_base - broken stack");
-		return NULL;
+		return 1;
 	}
 
-	return_value++;
 	if (global_stack_set_pptr(ctx, return_value)) {
 		DEBUG_ERROR("_interpreter_pop_base - broken stack 2");
-		return NULL;
+		return 1;
 	}
 
 
-	return previous_base;
+	return 0;
 }
 
 // This function is moved down, so it can see defined builtin functions.
@@ -3229,22 +3348,26 @@ INLINE int _interpreter_prepare_func(struct context* ctx, struct AstNode* node) 
 				global_set_error_interpreter_stack(ctx);
 				return 1;
 			}
-		} else if (type_ast_isfunc(arg)) {  // TODO : Handle more generic
-			int subroutine_ret =
-				_interpreter_prepare_func(ctx, arg);
-			if (subroutine_ret) {
-				// Global error will be already set
-				return 1;
-			}
-			// Stack is now reset, but return value is still there.
-			// So let's just move stack up
-			if (!global_stack_push_var(ctx, sizeof(struct StackField))) {
-				global_set_error_interpreter_stack(ctx);
-				return 1;
-			}
+		// } else if (type_ast_isfunc(arg)) {  // TODO : Handle more generic
+		// 	// TODO: Check this return value
+		// 	int subroutine_ret =
+		// 		interpreter_run_recursive(ctx, arg);
+		// 	if (subroutine_ret) {
+		// 		// Global error will be already set
+		// 		return 1;
+		// 	}
+		// 	// Stack is now reset, but return value is still there.
+		// 	// So let's just move stack up
+		// 	if (!global_stack_push_var(ctx, sizeof(struct StackField))) {
+		// 		global_set_error_interpreter_stack(ctx);
+		// 		return 1;
+		// 	}
 		} else {
-			global_set_error(ctx, ERROR_CRITICAL);
-			return 1;
+			if (interpreter_run_recursive(ctx, arg)) {
+				// Error set by interpreter_run_recursive
+				return 1;
+			}
+			// Now stack points to return value of recursive call
 		}
 	}
 	// Push argcount
@@ -3274,8 +3397,114 @@ INLINE int _interpreter_prepare_func(struct context* ctx, struct AstNode* node) 
 	return 0;
 }
 
+/** Execute if node. Returns (on stack) return value of given branch or nil if
+ *  branch does not exists
+ * */
+int _interpreter_execute_if(struct context* ctx, struct AstNode* node) {
+	// TODO: This function actually never creates base
+	if (!type_ast_isif(node)) {
+		global_set_error_critical(ctx);
+		return 1;
+	}
+
+	struct AstNode* condition_ast = type_ast_if_get_condition(node);
+	if (!condition_ast) {
+		global_set_error_ast_critical(ctx);
+		return 1;
+	}
+
+	if (interpreter_run_recursive(ctx, condition_ast)) {
+		return 1;
+	}
+
+	struct StackField* cond_val = _interpreter_stack_get_top_value(ctx);
+	struct ExpressionT* cond_expr = type_stackfield_value_get(cond_val);
+	if (!cond_expr) {
+		global_set_error_interpreter_general(ctx);
+		return 1;
+	}
+
+	// Evaluate 
+	int cond_bool = type_to_bool(cond_expr);
+
+	// Clean up condition value. At this point, stack will be clean -
+	// nothing left by executing this if
+
+	if (_interpreter_stack_delete_top_value(ctx)) {
+		global_set_error_interpreter_general(ctx);
+		return 1;
+	}
+
+	struct AstNode* body_node;  // Either true or false body
+	if (cond_bool) {
+		body_node = type_ast_if_get_true(node);
+	} else {
+		body_node = type_ast_if_get_false(node);
+	}
+
+
+	// If body is NULL run recursive will return nil value
+	if (interpreter_run_recursive(ctx, body_node)) {
+		// Error is already set by interpreter_run_recursive
+		return 1;
+	}
+
+	// Take return value and REreturn it
+//	struct StackField* stack_top = _interpreter_stack_get_top_value(ctx);
+//	struct ExpressionT* ret_expr = type_stackfield_value_get(stack_top);
+//	if (!ret_expr) {
+//		global_set_error_interpreter_general(ctx);
+//		return 1;
+//	}
+//
+//	interpreter_return_value(ctx, ret_expr);
+
+	return 0;
+}
+
+/** Put value on the stack, so everything is same as if value was returned from
+ *  some (non existing) function
+ *
+ *  Returns 0 on success
+ *  Returns 1 on failure
+ */
+STATIC int _interpreter_execute_val(struct context* ctx, struct AstNode* node) {
+	if (!type_ast_isval(node)) {
+		global_set_error_critical(ctx);
+		return 1;
+	}
+
+	struct ExpressionT* value = type_ast_val_get(node);
+	struct StackField* stack_top = _interpreter_stack_push_arg(ctx, value);
+	if (!stack_top) {
+		global_set_error_interpreter_stack(ctx);
+		return 1;
+	}
+	return 0;
+}
+
+/** Put nil on stack and return.
+ *
+ *  Return 0 on success
+ *  Return 1 on failure
+ */
+STATIC int _interpreter_execute_nil(struct context* ctx) {
+	struct ExpressionT* expr = global_get_nil(ctx);
+	if (!expr) {
+		global_set_error_critical(ctx);
+		return 1;
+	}
+	struct StackField* field = _interpreter_stack_push_arg(ctx, expr);
+	if (!field) {
+		global_set_error_interpreter_stack(ctx);
+		return 1;
+	}
+	return 0;
+}
 
 /** Set return value of currently executing function to expr
+ *
+ * On failure does nothing. (Debug output)
  */
 void interpreter_return_value(struct context* ctx, struct ExpressionT* expr) {
 	struct StackField* base = _interpreter_get_base(ctx);
@@ -3294,11 +3523,28 @@ void interpreter_return_value(struct context* ctx, struct ExpressionT* expr) {
 	}
 }
 
-STATIC void interpreter_run_recursive(struct context* ctx, struct AstNode* node) {
-	if (type_ast_isfunc(node)) {
-		_interpreter_prepare_func(ctx, node);
-
+/** Execute node and move stack pointer one field up. In that space will be
+ *  return value of this node.
+ *
+ *  Return 0 on success
+ *  Return 1 on error
+ */
+STATIC int interpreter_run_recursive(struct context* ctx, struct AstNode* node) {
+	int ret = 0;
+	if (!node) {
+		ret = _interpreter_execute_nil(ctx);
+	} else if (type_ast_isfunc(node)) {
+		ret = _interpreter_prepare_func(ctx, node);
+	} else if (type_ast_isif(node)) {
+		ret = _interpreter_execute_if(ctx, node);
+	} else if (type_ast_isval(node)) {
+		ret = _interpreter_execute_val(ctx, node);
 	}
+
+	if (ret && !global_is_error(ctx)) {
+		global_set_error_interpreter_general(ctx);
+	}
+	return ret;
 }
 
 /** Get number of pushed arguments on stack for current function.
