@@ -4,9 +4,6 @@
 #define LOCAL static
 #define STATIC static
 #define INLINE static inline
-#define NULL 0
-#define FALSE 0
-#define TRUE 1
 #define STACK_SIZE 4096
 #define HEAP_SIZE 4096
 #define U32_MAX 0xffffffff
@@ -17,6 +14,12 @@
 #define i64 signed long long
 
 #define CONST_ERROR_PARSER_BUFFER_SIZE 10
+
+#ifndef RASBI_NO_STD_REDEFINE
+#define NULL 0
+#define FALSE 0
+#define TRUE 1
+#endif
 
 #if DEBUG == 1
 

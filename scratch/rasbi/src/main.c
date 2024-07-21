@@ -3424,7 +3424,7 @@ int _interpreter_execute_if(struct context* ctx, struct AstNode* node) {
 		return 1;
 	}
 
-	// Evaluate 
+	// Evaluate
 	int cond_bool = type_to_bool(cond_expr);
 
 	// Clean up condition value. At this point, stack will be clean -
@@ -4222,7 +4222,12 @@ error:
 	sys_exit(1);
 }
 
-void _start() {
+#if RASBI_STDLIB == 0
+void _start()
+#else
+int main()
+#endif
+{
 #ifdef TEST
 	run_tests();
 #endif
