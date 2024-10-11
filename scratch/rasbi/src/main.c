@@ -103,6 +103,7 @@ enum ErrorCodes {
 
 	ERROR_INTERPRETER_STACK_ALLOC   = 64,
 	ERROR_INTERPRETER_GENERAL       = 65,
+	ERROR_INTERPRETER_SHADOWING     = 66,
 };
 
 struct StringExpression {
@@ -201,6 +202,7 @@ struct AstNode {
 			struct ExpressionT* name;
 			// TODO: Change initial_value to AST_NODE
 			struct ExpressionT* initial_value;
+			// Code that is 'inside' let block
 			struct AstNode* function;
 		} ast_let;
 
@@ -258,13 +260,15 @@ struct context {
 	// This variable represents context, that can be passed with this down
 	// the function call chain.  Each function may read it or replace it
 	// for functions that it will call next.  But after returning, it
-	// should be restored to parents value.  It is vaguely similar to
-	// golang contexts.
+	// should be restored to parents value.
 	void* stage;
 	enum StageType stage_type;
 	// Error handling
 	u64 error_code;
 	struct ErrorContext error_context;
+	// Local variables. This is pointer to assoca holding local (function
+	// local) variables
+	struct ExpressionT* local_vars;
 };
 
 
@@ -448,6 +452,7 @@ void init_context(struct context* ctx) {
 	ctx->error_code = 0;
 	ctx->stage = (void*)0;
 	ctx->nil.expr_type = TYPE_NIL;
+	ctx->local_vars = NULL;
 }
 
 LOCAL void* global_stack_push_var(struct context* ctx, u64 size) {
@@ -627,11 +632,18 @@ INLINE void global_set_error_ast_critical(struct context* ctx) {
 	global_set_error(ctx, ERROR_AST_CRITICAL);
 }
 
+// TODO: Print variable name
+STATIC void global_set_error_shadowing(struct context* ctx) {
+	global_set_error(ctx, ERROR_INTERPRETER_SHADOWING);
+	return;
+}
+
 INLINE u64 global_get_error(struct context* ctx) {
 	if (ctx)
 		return ctx->error_code;
 	return 0;
 }
+
 
 INLINE i32 _global_format_error_wrapper(const char* format_str, char* buffer, u64 buffer_size, const u64* argv) {
 	i64 written = runtime_format(format_str, buffer, buffer_size, argv);
@@ -1700,7 +1712,7 @@ u64 type_assoca_insert(struct ExpressionT* expr, const char* str, u64 size, u64 
 		}
 	}
 
-	// Modify header
+	// Modify header, or fails if there is not enough space
 	struct Varchar* vchar = _type_assoca_get_free(expr);
 	if (_type_assoca_header_insert(header, (u64)vchar)) {
 		// Insert of index failed, but no permanent damage
@@ -2039,6 +2051,7 @@ INLINE struct ExpressionT* type_ast_val_get(struct AstNode* node) {
 }
 
 // AST_LET
+
 INLINE struct AstNode* type_ast_alloc_let(struct context* ctx) {
 	struct AstNode* node = _type_ast_alloc_stack(ctx);
 	if (!node) {
@@ -2053,6 +2066,27 @@ INLINE struct AstNode* type_ast_alloc_let(struct context* ctx) {
 
 INLINE u32 type_ast_islet(struct AstNode* node) {
 	return type_ast_is(node, AST_LET);
+}
+
+INLINE struct ExpressionT* type_ast_let_name(struct AstNode* node) {
+	if (!type_ast_islet(node)) {
+		return NULL;
+	}
+	return node->ast_let.name;
+}
+
+INLINE struct AstNode* type_ast_let_body(struct AstNode* node) {
+	if (!type_ast_islet(node)) {
+		return NULL;
+	}
+	return node->ast_let.function;
+}
+
+INLINE struct ExpressionT* type_ast_let_initial(struct AstNode* node) {
+	if (!type_ast_islet(node)) {
+		return NULL;
+	}
+	return node->ast_let.initial_value;
 }
 
 // AST_PROGN
@@ -3312,8 +3346,85 @@ int _interpreter_pop_base(struct context* ctx) {
 	return 0;
 }
 
+/**  Initialize space for local variables.
+ *
+ *   Return 0 on succes
+ */
+int interpreter_init_local_vars(struct context* ctx) {
+	if (ctx->local_vars) {
+		return 0;
+	}
+	struct ExpressionT* assoca = type_assoca_alloc(ctx, 5);
+	if (!assoca) {
+		global_set_error_oom(ctx);
+		return ERROR_OOM;
+	}
+	ctx->local_vars = assoca;
+	return 0;
+}
+
+/** Get pointer to local_variables assoca.
+ */
+INLINE struct ExpressionT* _interpreter_get_local_vars(struct context* ctx) {
+	return ctx->local_vars;
+}
+
+
 // This function is moved down, so it can see defined builtin functions.
 u64 interpreter_load_builtins(struct context* ctx);
+
+/** Process let block.
+ *  Create space for local variable and set its value.
+ */
+STATIC int _interpreter_execute_let(struct context* ctx, struct AstNode* node) {
+	struct ExpressionT* new_var_name = type_ast_let_name(node);
+	if (!type_ast_islet(node) || !new_var_name) {
+		global_set_error_critical(ctx);
+		return 1;
+	}
+
+	struct ExpressionT* variables = _interpreter_get_local_vars(ctx);
+	if (!variables) {
+		global_set_error_critical(ctx);
+		return 1;
+	}
+
+	// Check for shadowing
+	struct ExpressionT* old_value =
+		type_assoca_get(variables,
+				type_string_getp(new_var_name),
+				type_string_get_length(new_var_name));
+
+	if (old_value) { // There already is variable with same name - FAIL
+		global_set_error_shadowing(ctx);
+		return 1;
+	}
+	// Insert new value
+	u64 insert_ret = type_assoca_insert(variables, 
+			type_symbol_get_str(new_var_name),
+			type_symbol_get_size(new_var_name),
+			(u64)type_ast_let_initial(node));
+
+	if (insert_ret) { // Probably not enough space... TODO
+		DEBUG_ERROR("Too many variables. TODO.");
+		global_set_error_oom(ctx);
+		return 1;
+	}
+
+	if (interpreter_run_recursive(ctx, type_ast_let_body(node))) {
+		return 1;
+	}
+
+
+	u32 delete_ret = type_assoca_delete(variables,
+			type_symbol_get_str(new_var_name),
+			type_symbol_get_size(new_var_name));
+	// This can be deleted later
+	if (delete_ret) {
+		DEBUG_ERROR("Deletion from assoca failed");
+	}
+	return 0;
+}
 
 /** Call function from node. Assume that stack is already prepared
  */
@@ -3400,7 +3511,7 @@ INLINE int _interpreter_prepare_func(struct context* ctx, struct AstNode* node) 
 /** Execute if node. Returns (on stack) return value of given branch or nil if
  *  branch does not exists
  * */
-int _interpreter_execute_if(struct context* ctx, struct AstNode* node) {
+STATIC int _interpreter_execute_if(struct context* ctx, struct AstNode* node) {
 	// TODO: This function actually never creates base
 	if (!type_ast_isif(node)) {
 		global_set_error_critical(ctx);
@@ -3539,6 +3650,8 @@ STATIC int interpreter_run_recursive(struct context* ctx, struct AstNode* node) 
 		ret = _interpreter_execute_if(ctx, node);
 	} else if (type_ast_isval(node)) {
 		ret = _interpreter_execute_val(ctx, node);
+	} else if (type_ast_islet(node)) {
+		ret = _interpreter_execute_let(ctx, node);
 	}
 
 	if (ret && !global_is_error(ctx)) {
@@ -3567,10 +3680,6 @@ INLINE u16 interpreter_get_arg_count(struct context* ctx) {
 	}
 	return type_stackfield_get_argcount(base);
 }
-
-// TODO: struct StackField* _interpreter_get_argcount_field(struct StackField* base)
-// TODO: struct StackField* _interpreter_get_argument_field(struct StackField* base, u16 position)
-// TODO: struct ExpressionT* interpreter_get_argument(struct context* ctx)
 
 /** Get pointer to struct ExpressionT containing argument.
  *  First argument to this function must be pointer to base of function, for
@@ -3619,7 +3728,11 @@ int interpreter_execute(struct context* ctx) {
 //	if (interpreter_load_builtins(ctx)) {
 //		return -ERROR_CRITICAL;
 //	}
-//
+
+	// Initialize space for local variables
+	if (interpreter_init_local_vars(ctx)) {
+		return 1;
+	}
 	interpreter_run_recursive(ctx, ctx->program_ast);
 
 	return 0;
