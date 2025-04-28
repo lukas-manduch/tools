@@ -20,6 +20,8 @@ global_files = [
     "/etc/pam.d",
     "/etc/pam.conf",
     "/etc/ssh",
+    "/usr/bin",
+    "/usr/sbin",
     "/sbin/init/",
     "/lib/systemd/systemd",
     "/lib/systemd/systemd-ac-power",
@@ -356,6 +358,23 @@ def _try_get_path(path):
         return _try_get_path_dir(path)
     return [_try_get_path_file(path)]
 
+def _get_proc_details(folder_path):
+    result = dict()
+    folder_path = pathlib.PurePath(folder_path)
+
+    result["cmd"] = get_some_bytes(str(folder_path.joinpath("cmdline")))
+    result["comm"] = get_some_bytes(str(folder_path.joinpath("comm"))).strip()
+    result["hash"] = global_hasher.get(str(folder_path.joinpath("exe")))
+    return result
+
+def main_proc():
+    proc = pathlib.Path("/proc")
+    proc_pattern = re.compile(r"^/proc/\d+/?$")
+    result = list()
+    for dire in proc.iterdir():
+        if proc_pattern.match(str(dire)):
+            result.append(_get_proc_details(dire))
+    return result
 
 def main_files():
     results = list()
@@ -366,12 +385,17 @@ def main_files():
 
 def main(args):
     result = dict()
+    result["issue"] = get_some_bytes("/etc/issue").strip()
+    result["hostname"] = get_some_bytes("/etc/hostname").strip()
     if args.systemd:
         services = main_services()
         result["systemd"] = services
 
     if args.files:
         result["files"] = main_files()
+
+    if args.proc:
+        result["proc"] = main_proc()
     print(yaml.dump(result))
 
 
@@ -393,6 +417,14 @@ if __name__ == "__main__":
         help="Disable file enumeration",
         const=False,
         dest="files",
+    )
+    parser.add_argument(
+        "--no-proc",
+        action="store_const",
+        default=True,
+        help="Dont iterate proc",
+        const=False,
+        dest="proc",
     )
     args = parser.parse_args()
     #service = SystemdService()
