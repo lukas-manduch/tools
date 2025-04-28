@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
+
+# Copyright 2025 Lukas Manduch
+
+
 # TODO: Environment
 # TODO: Fix exec flags
 import argparse
+import grp
 import hashlib
 import json
 import os
 import pathlib
+import pwd
 import re
 import shutil
 import subprocess
@@ -20,6 +26,7 @@ global_files = [
     "/etc/pam.d",
     "/etc/pam.conf",
     "/etc/ssh",
+    "/etc/init.d",
     "/usr/bin",
     "/usr/sbin",
     "/sbin/init/",
@@ -110,42 +117,12 @@ def _try_remove_systemd_specials(path):
     return str(path).lstrip("-+!:@")
 
 
-def cut_command_line(command: str):
-    # First handle quotes
-    parts = list()
-    results = (None, str(command), )
-    # Double quotes
-    while True:
-        results = _cut_quotes(results[1], '"')
-        if results == None:
-            break
-        piece = results[0]
-        parts.append(piece)
-    # Single quotes
-    results = (None, str(command), )
-    while True:
-        results = _cut_quotes(results[1], "'")
-        if results == None:
-            break
-        piece = results[0]
-        parts.append(piece)
-    # Spaces
-    parts += command.split(sep=" ")
-    clean_parts = list()
-
-    for part in parts:
-        clean_part = _try_remove_systemd_specials(part)
-        if part != clean_part:
-            clean_parts.append(clean_part)
-
-    return parts + clean_parts
-
 
 def get_some_bytes(absolute):
     filename = FileHasher.try_get_absolute(absolute)
     try:
         with open(filename, "rb") as f:
-            content = f.read(2048)
+            content = f.read(128)
             try:
                 return content.decode('utf-8')
             except Exception:
@@ -153,6 +130,42 @@ def get_some_bytes(absolute):
     except Exception as e:
         return str(e)
 
+def _try_get_acl(absolute: pathlib.Path):
+    # At first check if getfacl exists. If it doesn't, subprocess.run cannot
+    # be called, or it will throw Exception.
+    getfacl = "/usr/bin/getfacl"
+    if not pathlib.Path(getfacl).is_file():
+        return "[acl_failed]"
+    result = subprocess.run([getfacl, str(absolute)], capture_output=True, timeout=15, check=False)
+    if result.returncode != 0:
+        return "[acl_failed]"
+    perm_pattern = re.compile(r"^\w+:\w+:.*$")
+    ret = ""
+    for line in result.stdout.decode("utf-8").split("\n"):
+        print(line)
+        if perm_pattern.match(line):
+            ret += line 
+    if ret:
+        return "ACL_EXTRA " + ret
+    return "ACL_NONE"
+
+def get_file_permissions(absolute):
+    """File permissions."""
+    result = ""
+    try:
+        absolute = pathlib.Path(absolute)
+        stats = absolute.stat()
+        result += pwd.getpwuid(stats.st_uid)[0]
+        result += ":"
+        result += grp.getgrgid(stats.st_gid)[0]
+        result += ":"
+        result += oct(stats.st_mode)
+
+        result += "   "
+        result += _try_get_acl(absolute)
+    except Exception as e:
+        result = f"Error {e}"
+    return result
 
 class FileHasher:
 
@@ -231,6 +244,38 @@ class FileHasher:
         return shutil.which(str(command))
 
 global_hasher = FileHasher()
+
+########################## BEGIN SYSTEMD ##################################
+
+def cut_command_line(command: str):
+    # First handle quotes
+    parts = list()
+    results = (None, str(command), )
+    # Double quotes
+    while True:
+        results = _cut_quotes(results[1], '"')
+        if results == None:
+            break
+        piece = results[0]
+        parts.append(piece)
+    # Single quotes
+    results = (None, str(command), )
+    while True:
+        results = _cut_quotes(results[1], "'")
+        if results == None:
+            break
+        piece = results[0]
+        parts.append(piece)
+    # Spaces
+    parts += command.split(sep=" ")
+    clean_parts = list()
+
+    for part in parts:
+        clean_part = _try_remove_systemd_specials(part)
+        if part != clean_part:
+            clean_parts.append(clean_part)
+
+    return parts + clean_parts
 
 class SystemdService:
 
@@ -314,6 +359,9 @@ def _call_list_services():
     result = subprocess.run(command.split(), capture_output=True, timeout=15, check=True)
     return result.stdout
 
+############################# END SYSTEMD ##################################
+
+########################## BEGIN FILE HASHING ###############################
 def main_services():
     services_json = _call_list_services()
     services_obj = json.loads(services_json)
@@ -333,6 +381,7 @@ def _try_get_path_file(path):
         result["size"] = path.stat().st_size
         result["hash"] = global_hasher.get(absolute) or "None"
         result["sample"] = get_some_bytes(absolute)
+        result["permissions"] = get_file_permissions(absolute)
     except Exception as e:
         result["error"] = str(e)
     return result
@@ -357,6 +406,8 @@ def _try_get_path(path):
     if path.is_dir():
         return _try_get_path_dir(path)
     return [_try_get_path_file(path)]
+
+########################## END FILE HASHING ###############################
 
 def _get_proc_details(folder_path):
     result = dict()
