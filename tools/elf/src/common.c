@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -21,9 +22,10 @@ struct ElfMapping* alloc_elf() {
 	return ptr;
 }
 
-int load_elf(const char* filename, struct ElfMapping* mapping) {
+int load_elf(const char* filename, struct ElfMapping* mapping, bool write) {
 	int ret = 0;
-	int fd = open(filename,O_RDONLY, 0);
+	int mode = write ? O_RDWR : O_RDONLY;
+	int fd = open(filename,mode, 0);
 	struct stat stats;
 	if (fd < 0) {
 		ret = -errno;
@@ -36,7 +38,8 @@ int load_elf(const char* filename, struct ElfMapping* mapping) {
 		goto error;
 	}
 	mapping->length = stats.st_size;
-	mapping->start = mmap(NULL, mapping->length ,PROT_READ , MAP_PRIVATE, fd, 0);
+	int prot = write ? PROT_READ | PROT_WRITE : PROT_READ;
+	mapping->start = mmap(NULL, mapping->length , prot, MAP_PRIVATE, fd, 0);
 	if (mapping->start == MAP_FAILED) {
 		mapping->start = 0;
 		ret = -errno;
@@ -45,6 +48,7 @@ int load_elf(const char* filename, struct ElfMapping* mapping) {
 	}
 	close(fd);
 	ret = 0;
+	mapping->elf_header = (Elf64_Ehdr*)mapping->start;
 	return ret;
 error:
 	if (ret < 0) {
@@ -59,18 +63,49 @@ void free_elf(struct ElfMapping* mapping) {
 	mapping->elf_header = 0;
 }
 
-
-Elf64_Shdr* _get_sstrtab(struct ElfMapping* elf) {
-	Elf64_Ehdr *hdr = elf->elf_header;
-	Elf64_Shdr* section = (Elf64_Shdr*)(((char*)elf->start) + hdr->e_shoff);
-	Elf64_Shdr* last_viable = NULL;
-	for (int i = 0; i < hdr->e_shnum; i++, section++) {
-		if (section->sh_type == SHT_STRTAB) {
-			last_viable = section;
+void pretty_print(void* data, unsigned short length) {
+	const char* cdata = (const char*)data;
+	for (size_t i = 0; i < length; i++) {
+		if (isspace(cdata[i])) {
+			putchar(' ');
+		}
+		else if (!isprint(cdata[i])) {
+			putchar('?');
+		} else {
+			putchar(cdata[i]);
+		}
+		if (i % 80 == 0) {
+			putchar('\n');
+		}
+		if (i >= 80*20000) {
+			return;
 		}
 	}
-	return last_viable;
+	putchar('\n');
 }
+
+static Elf64_Shdr* _get_sstrtab(struct ElfMapping* elf) {
+	Elf64_Ehdr *hdr = elf->elf_header;
+	Elf64_Shdr* section = (Elf64_Shdr*)(((char*)elf->start) + hdr->e_shoff);
+	return &section[elf->elf_header->e_shstrndx];
+	//Elf64_Shdr* last_viable = NULL;
+	//for (int i = 0; i < hdr->e_shnum; i++, section++) {
+	//	if (section->sh_type == SHT_STRTAB) {
+	//		last_viable = section;
+	//	}
+	//}
+	//return last_viable;
+}
+
+const char* index_strtab(struct ElfMapping* elf, unsigned int index) {
+	Elf64_Shdr* strtab = _get_sstrtab(elf);
+	if (!strtab) {
+		return NULL;
+	}
+	const char* data = ((const char*)elf->start) + strtab->sh_offset;
+	return &data[index];
+}
+
 
 /** This only prints small part of section and only printable characters
  */
@@ -78,11 +113,12 @@ void pprint_section(struct ElfMapping* elf, Elf64_Shdr* section) {
 	char* data = (char*)elf->start + section->sh_offset;
 	size_t total_printed = 0;
 	for (size_t i = 0; i < section->sh_size; i++) {
-		if (!isprint(data[i]))
-			continue;
 		total_printed++;
 		if (isspace(data[i])) {
 			putchar(' ');
+		}
+		else if (!isprint(data[i])) {
+			putchar('?');
 		} else {
 			putchar(data[i]);
 		}
@@ -184,4 +220,33 @@ void parse_segments(struct ElfMapping* elf) {
 		}
 		printf("\n");
 	}
+}
+
+Elf64_Shdr* elf_get_section_raw(struct ElfMapping* elf, const char* name) {
+	Elf64_Ehdr *hdr = elf->elf_header;
+	Elf64_Shdr* section = (Elf64_Shdr*)(((char*)elf->start) + hdr->e_shoff);
+	for (int i = 0; i < hdr->e_shnum; i++, section++) {
+		const char* current_name = index_strtab(elf, section->sh_name);
+		if (!current_name) {
+			return NULL;
+		}
+		if (strcmp(current_name, name) == 0) {
+			return section;
+		}
+	}
+	return NULL;;
+}
+
+
+int elf_get_section(struct ElfMapping* elf, const char* name, void** start, void** end) {
+	if (!start || !end || !elf) {
+		return -1;
+	}
+	Elf64_Shdr* section = elf_get_section_raw(elf, name);
+	if (!section) {
+		return -1;
+	}
+	*start = ((char*)elf->start) + section->sh_offset;
+	*end = ((char*)*start) + section->sh_size;
+	return 0;
 }

@@ -1,10 +1,8 @@
-#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-
-#include <elf.h>
-#include <fcntl.h>
 #include <getopt.h>
+
+#include <sys/param.h>
 #include <unistd.h>
 
 #include "common.h"
@@ -16,9 +14,9 @@ struct Settings {
 
 
 static void print_help() {
-	printf("pcap_replay - Parse pcap file.\n");
+	printf("go_pcln - manipulate metadata section of GO\n");
 	printf("\t-h | --help        \tPrint help and exit.\n");
-	printf("\t-f | --file <index>\tPcap file. Required\n");
+	printf("\t-f | --file <index>\tElf file. Required\n");
 }
 
 static struct Settings parse_arguments(int argc, char** argv) {
@@ -48,9 +46,11 @@ static struct Settings parse_arguments(int argc, char** argv) {
 				break;
 		}
 	}
+	if (argc == 1) {
+		settings.help = true;
+	}
 	return settings;
 }
-
 
 int main(int argc, char** argv) {
 	struct Settings settings = parse_arguments(argc, argv);
@@ -60,10 +60,21 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	struct ElfMapping* elf = alloc_elf();
-	if ((ret = load_elf(settings.filename, elf)) != 0) {
+	if ((ret = load_elf(settings.filename, elf, true)) != 0) {
 		printf("Error opening file %d\n", -ret);
 		return 1;
 	}
+
+	void *start, *end;
+	ret = elf_get_section(elf, ".gopclntab", &start, &end);
+	if (ret) {
+		printf("Problem with finding gopclntab go section\n");
+		ret = 1;
+		goto exit;
+	}
+	pretty_print(start, MIN(((char*)end)-((char*)start), 80*10));
+
+exit:
 	free_elf(elf);
 	return ret;
 }

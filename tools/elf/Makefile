@@ -1,14 +1,16 @@
 CFLAGS += -Wall -Wextra -g
 #LD = ld
 
-elfer: main.o
-	gcc -g -lc  $< -o $@ 
+build/elfer: build/main.o build/common.o
+	gcc -g -lc  build/main.o build/common.o -o $@ 
 
+build/go_pcln: build/go_pcln.o build/common.o
+	gcc -g -lc  build/go_pcln.o build/common.o -o $@ 
 clean:
-	rm -f elfer main.o
-
-go_wipe: go_wipe.o
-	gcc $(CFLAGS) $< -o $@
+	rm build/*.o
 
 
-all: elfer go_wipe
+build/%.o: src/%.c
+	$(CC)  -c $(CFLAGS) $< -o $@
+
+all: build/elfer build/go_pcln
