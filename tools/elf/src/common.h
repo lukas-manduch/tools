@@ -24,7 +24,15 @@ Elf64_Shdr* elf_get_section_raw(struct ElfMapping*, const char* name);
  */
 int elf_get_section(struct ElfMapping*, const char* name, void** start, void** end);
 
+/** Given section index, retrieve it's start and end address.
+ *
+ * Returns 0 on success
+ */
+int elf_get_section_by_index(struct ElfMapping* elf, unsigned short index, void** start, void** end);
 /** Pretty prints up to length bytes
  */
 void pretty_print(void* data, unsigned short length);
+/** Given section index, returns section name or NULL
+ */
+const char* get_section_name(struct ElfMapping* elf, int index);
 #endif

@@ -39,7 +39,7 @@ int load_elf(const char* filename, struct ElfMapping* mapping, bool write) {
 	}
 	mapping->length = stats.st_size;
 	int prot = write ? PROT_READ | PROT_WRITE : PROT_READ;
-	mapping->start = mmap(NULL, mapping->length , prot, MAP_PRIVATE, fd, 0);
+	mapping->start = mmap(NULL, mapping->length , prot, MAP_SHARED, fd, 0);
 	if (mapping->start == MAP_FAILED) {
 		mapping->start = 0;
 		ret = -errno;
@@ -237,7 +237,6 @@ Elf64_Shdr* elf_get_section_raw(struct ElfMapping* elf, const char* name) {
 	return NULL;;
 }
 
-
 int elf_get_section(struct ElfMapping* elf, const char* name, void** start, void** end) {
 	if (!start || !end || !elf) {
 		return -1;
@@ -249,4 +248,22 @@ int elf_get_section(struct ElfMapping* elf, const char* name, void** start, void
 	*start = ((char*)elf->start) + section->sh_offset;
 	*end = ((char*)*start) + section->sh_size;
 	return 0;
+}
+
+int elf_get_section_by_index(struct ElfMapping* elf, unsigned short index, void** start, void** end) {
+	if (!start || !end || !elf) {
+		return -1;
+	}
+	Elf64_Ehdr *hdr = elf->elf_header;
+	Elf64_Shdr* section = (Elf64_Shdr*)(((char*)elf->start) + hdr->e_shoff);
+	section = section + index;
+	*start = ((char*)elf->start) + section->sh_offset;
+	*end = ((char*)*start) + section->sh_size;
+	return 0;
+}
+
+const char* get_section_name(struct ElfMapping* elf, int index) {
+	Elf64_Ehdr *hdr = elf->elf_header;
+	Elf64_Shdr* section = (Elf64_Shdr*)(((char*)elf->start) + hdr->e_shoff);
+	return index_strtab(elf, section[index].sh_name);
 }
