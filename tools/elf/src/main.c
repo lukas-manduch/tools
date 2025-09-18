@@ -65,17 +65,8 @@ int main(int argc, char** argv) {
 		printf("Error opening file %d\n", -ret);
 		return 1;
 	}
-	printf("Index %d\n", elf->elf_header->e_shstrndx);
 	//parse_sections(elf);
-	{
-		void *start, *end;
-		ret = elf_get_section(elf, ".gopclntab", &start, &end);
-		if (ret) {
-			printf("Problem with go section\n");
-			return 1;
-		}
-		pretty_print(start, end-start);
-	}
+	
 	free_elf(elf);
 	return ret;
 }

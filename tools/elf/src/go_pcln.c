@@ -73,6 +73,12 @@ int main(int argc, char** argv) {
 		goto exit;
 	}
 	pretty_print(start, MIN(((char*)end)-((char*)start), 80*10));
+	for (size_t i = 0; i < ((char*)end)-((char*)start); i++) {
+		char* data = (char*)start;
+		if (data[i] == 'm') {
+			data[i] = 'n';
+		}
+	}
 
 exit:
 	free_elf(elf);

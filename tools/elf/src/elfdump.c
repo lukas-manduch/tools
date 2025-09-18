@@ -1,3 +1,7 @@
+// This program given empty folder, dumps every section to it's own file.
+
+// TODO: Print also sections metadata
+
 #include <dirent.h>
 #include <stdio.h>
 #include <string.h>
@@ -138,7 +142,7 @@ int main(int argc, char** argv) {
 			printf("Cannot retrieve section %d\n", i);
 			continue;
 		}
-		snprintf(filename, 100, "%02d%s", i, section_name ? section_name : "");
+		snprintf(filename, 100, "%02d%s", i, section_name ? section_name : "Unknown");
 		int section_file_fd = open_section_file(settings.directory, filename);
 		if (section_file_fd < 0) {
 			printf("Cannot open file for section %d\n", section_file_fd);
@@ -146,7 +150,7 @@ int main(int argc, char** argv) {
 		}
 		size_t section_length = ((char*)end)-((char*)start);
 		long written = write(section_file_fd, start, section_length);
-		printf("Wrote %lu %ld\n", section_length, written);
+		printf("Wrote %lu %ld, %s\n", section_length, written, section_name ? section_name : "Unknown");
 		if (written == -1) {
 			perror("OOO");
 		}

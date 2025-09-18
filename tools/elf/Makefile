@@ -13,7 +13,6 @@ build/elfdump: build/elfdump.o build/common.o
 clean:
 	rm build/*.o
 
-
 build/%.o: src/%.c
 	$(CC)  -c $(CFLAGS) $< -o $@
 
