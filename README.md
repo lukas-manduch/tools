@@ -13,6 +13,9 @@ Some of them are:
 - tools/hex2bin - C utility to convert raw hex data to binary. This is the one
   tool, that is missing in all distros (actually this can be achieved with xxd
   I just didn't figure it out from its documentation)
+- tools/gitclone - Scripts for syncing git mirrors
+- tools/systemd_parser - Script for fingerprinting systemd based OS.  This was
+  used in blue team scenarios.
 - scratch/rasbi - this is work in progress on my own lisp like programming
   language
 
