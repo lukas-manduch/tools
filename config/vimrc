@@ -73,14 +73,13 @@ noremap <Leader>p "+p
 noremap <Leader>P "+P
 noremap <Leader>n :nohl<CR>
 noremap <Leader>c :close<CR>
-noremap <Leader>o :only<CR>
+
 noremap <Leader>b :bd<CR>
 nnoremap <Leader>s :%s/\<<C-r><C-w>\>//g<Left><Left>
 
 nmap <leader>t :call ExecuteTest()<CR>
-
-noremap <Leader><C-r> :CtrlPBufTag<CR>
-noremap <Leader><C-p> :CtrlPTag<CR>
+noremap <Leader>o :BTags<CR>
+noremap <Leader>t :Tags<CR>
 inoremap <silent> <C-Space> <C-\><C-O>:ALEComplete<CR>
 
 
@@ -102,7 +101,7 @@ if has("autocmd")
 	augroup END
 endif
 
-colorscheme desert
+colorscheme habamax
 
 vmap X y/<C-R>"<CR>
 
