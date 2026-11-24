@@ -14,6 +14,7 @@
 #define i64 signed long long
 
 #define CONST_ERROR_PARSER_BUFFER_SIZE 10
+#define MAX_STACK_FRAME 100
 
 #ifndef RASBI_NO_STD_REDEFINE
 #define NULL 0

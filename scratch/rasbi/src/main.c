@@ -1,5 +1,7 @@
 #include "../include/defines.h"
 
+#define ASSERT(cond)       runtime_assert(!!(cond), __LINE__)
+
 // ============================
 //   PLATFORM
 // ============================
@@ -16,8 +18,8 @@ u64 sys_stat_stat_get_size(void* statbuf);
 i64 sys_open(const char *filename, i32 flags, i32 mode);
 i32 sys_open_flag_read();
 i32 sys_close(u32 fd);
-u64 platform_get_argc();
-char* platform_get_argv(u32 index);
+u64 platform_get_argc(int argc);
+char* platform_get_argv(char** argv, u32 index);
 
 // These two are really important to be inlined even in debug builds, because
 // otherwise compiler will generate some stack modification instructions
@@ -48,6 +50,7 @@ __attribute__((always_inline)) static inline u64 sys_stack_pop_u64() {
 i64 runtime_format(const char* format, char* buffer,
 		u64 buffer_size, const u64* argv);
 
+void runtime_assert(int truth, int lineno);
 // ============================
 //   END FORWARD DECLARATIONS
 // ============================
@@ -82,28 +85,30 @@ enum StageType {
 
 /* Error codes in struct context */
 enum ErrorCodes {
-	ERROR_SUCCESS                   = 0, // No error. Placeholder to protect 0
-	ERROR_GENERAL                   = 1,
-	ERROR_ARGUMENT                  = 2,
-	ERROR_STACK_ALLOC               = 3, // Unused
-	ERROR_OOM                       = 4,
-	ERROR_SYNTAX                    = 5,
-	ERROR_BUFFER_SIZE               = 6,
-	ERROR_CRITICAL                  = 7,
-	ERROR_BOUNDS                    = 8, // Index is out of range
+	ERROR_SUCCESS                    = 0, // No error. Placeholder to protect 0
+	ERROR_GENERAL                    = 1,
+	ERROR_ARGUMENT                   = 2,
+	ERROR_STACK_ALLOC                = 3, // Unused
+	ERROR_OOM                        = 4,
+	ERROR_SYNTAX                     = 5,
+	ERROR_BUFFER_SIZE                = 6,
+	ERROR_CRITICAL                   = 7,
+	ERROR_BOUNDS                     = 8, // Index is out of range
 
-	ERROR_PARSER                    = 16,
-	ERROR_PARSER_OOM                = 17, // Used by both parser and ast_builder
-	ERROR_PARSER_CHAR               = 18,
+	ERROR_PARSER                     = 16,
+	ERROR_PARSER_OOM                 = 17, // Used by both parser and ast_builder
+	ERROR_PARSER_CHAR                = 18,
 
-	ERROR_AST_EXPRESSION            = 32,
-	ERROR_AST_UNSUPPORTED           = 33,
-	ERROR_AST_SYMBOL_LONG           = 34,
-	ERROR_AST_CRITICAL              = 35, // Error in implementation / logic
+	ERROR_AST_EXPRESSION             = 32,
+	ERROR_AST_UNSUPPORTED            = 33,
+	ERROR_AST_SYMBOL_LONG            = 34,
+	ERROR_AST_CRITICAL               = 35, // Error in implementation / logic
 
-	ERROR_INTERPRETER_STACK_ALLOC   = 64,
-	ERROR_INTERPRETER_GENERAL       = 65,
-	ERROR_INTERPRETER_SHADOWING     = 66,
+	ERROR_INTERPRETER_STACK_ALLOC    = 64,
+	ERROR_INTERPRETER_GENERAL        = 65,
+	ERROR_INTERPRETER_SHADOWING      = 66,
+	ERROR_INTERPRETER_STACK_OVERFLOW = 67,
+	ERROR_INTERPRETER_STACK_CORRUPT  = 68,
 };
 
 struct StringExpression {
@@ -242,12 +247,37 @@ struct ErrorContext {
 	};
 };
 
-/** This is complete state of parser and interpreter.
+enum StackFrameState {
+	ISTATE_ANY_INIT,
+	ISTATE_LET_VARIABLES,
+	ISTATE_LET_FUNCTION,
+	ISTATE_LET_EXIT,
+
+	ISTATE_FUNC_EXEC,
+	ISTATE_FUNC_POP,
+};
+
+/** Stack frame for interpreter stack
+ */
+struct StackFrame {
+	// Node contains next "instruction to be executed"
+	struct AstNode *node;
+	// State is for current instruction (let / if / fnc) to mark it's own
+	// data, specifically what part should happen next - execute something,
+	// or pop something..
+	StackFrameState state;
+};
+
+/** This is complete state of this interpreter.
  */
 struct context {
 	char heap[HEAP_SIZE];
 
 	char stack[STACK_SIZE];
+
+	struct StackFrame interpreter_stack[MAX_STACK_FRAME];
+	u64 interpreter_stack_size;
+
 	unsigned short _stack_pointer;
 	unsigned short _base_pointer;
 	struct ExpressionT* program; // (CONS) parsed program
@@ -356,7 +386,6 @@ void __debug_print(const char* c) {
 #define DEBUG_ERROR(str) __debug_print(str)
 #endif
 
-
 void* heap_alloc(struct context* context, u64 size) {
 	u32 minimal_alloc = sizeof(struct AllocEntry) + 8;
 	u32 requested = round8(size);
@@ -453,6 +482,8 @@ void init_context(struct context* ctx) {
 	ctx->stage = (void*)0;
 	ctx->nil.expr_type = TYPE_NIL;
 	ctx->local_vars = NULL;
+
+	ctx->interpreter_stack_size = 0;
 }
 
 LOCAL void* global_stack_push_var(struct context* ctx, u64 size) {
@@ -553,6 +584,37 @@ void stack_set_sp(struct context* ctx, u64 sp) {
 	ctx->_stack_pointer = sp;
 }
 
+/** Push function frame on interpreter stack
+ */
+INLINE struct StackFrame* global_istack_push(struct context* ctx) {
+	if (ctx->interpreter_stack_size >= MAX_STACK_FRAME) {
+		return NULL;
+	}
+
+	u64 old_size = ctx->interpreter_stack_size++;
+	return &ctx->interpreter_stack[old_size];
+}
+
+/** Pop most recent function frame from interpreter stack
+ */
+INLINE void global_istack_pop(struct context* ctx) {
+	if (!ctx->interpreter_stack_size) {
+		return;
+	}
+
+	ctx->interpreter_stack_size--;
+}
+
+/** Return most recent function frame
+ */
+INLINE struct StackFrame* global_istack_get_frame(struct context* ctx) {
+	if (!ctx->interpreter_stack_size) {
+		return NULL;
+	}
+	return &ctx->interpreter_stack[ctx->interpreter_stack_size-1];
+
+}
+
 /** Return 1 if error is set. 0 otherwise
  */
 INLINE i32 global_is_error(struct context* ctx) {
@@ -575,6 +637,10 @@ INLINE void global_set_error_parser_oom(struct context* ctx) {
 
 INLINE void global_set_error_oom(struct context* ctx) {
 	global_set_error(ctx, ERROR_OOM);
+}
+
+INLINE void global_set_error_interpreter_stack_corruption(struct context* ctx) {
+	global_set_error(ctx, ERROR_INTERPRETER_STACK_CORRUPT);
 }
 
 INLINE void global_set_error_interpreter_stack(struct context* ctx) {
@@ -610,6 +676,13 @@ STATIC void global_set_error_ast(struct context* ctx, const struct ExpressionT* 
 	}
 	global_set_error(ctx, ERROR_AST_EXPRESSION);
 	ctx->error_context.parser_ast_error.expression = ptr;
+}
+
+STATIC void global_set_error_stack_overflow(struct context* ctx) {
+	if (global_is_error(ctx)) {
+		return;
+	}
+	global_set_error(ctx, ERROR_INTERPRETER_STACK_OVERFLOW);
 }
 
 STATIC void global_set_error_symbol_long(struct context* ctx, struct ExpressionT* ptr) {
@@ -3373,10 +3446,38 @@ INLINE struct ExpressionT* _interpreter_get_local_vars(struct context* ctx) {
 // This function is moved down, so it can see defined builtin functions.
 u64 interpreter_load_builtins(struct context* ctx);
 
-/** Process let block.
- *  Create space for local variable and set its value.
- */
-STATIC int _interpreter_execute_let(struct context* ctx, struct AstNode* node) {
+
+STATIC int _interpreter_execute_let_function(struct context* ctx, struct AstNode* node) {
+	// Set stack frame for let block
+	struct StackFrame* frame = global_istack_get_frame(ctx);
+	ASSERT(frame != NULL);
+	struct StackFrame* function_frame = global_istack_push(ctx);
+	if (!function_frame) {
+		global_set_error_stack_overflow(ctx);
+		return 1;
+	}
+	function_frame->node = type_ast_let_body(frame->node);
+	function_frame->state = ISTATE_ANY_INIT;
+	frame->state = ISTATE_LET_EXIT;
+	return 0;
+}
+
+STATIC int _interpreter_execute_let_pop(struct context* ctx, struct AstNode* node) {
+	struct ExpressionT* variables= _interpreter_get_local_vars(ctx);
+	struct ExpressionT* var_name = type_ast_let_name(node);
+	ASSERT(type_is_symbol(var_name));
+	u32 delete_ret = type_assoca_delete(variables,
+			type_symbol_get_str(var_name),
+			type_symbol_get_size(var_name));
+	if (delete_ret) {
+		DEBUG_ERROR("Deletion of var in LET failed");
+	}
+	// TODO : Propagate return value
+	global_istack_pop(ctx);
+	return 0;
+}
+
+STATIC int _interpreter_execute_let_vars(struct context* ctx, struct AstNode* node) {
 	struct ExpressionT* new_var_name = type_ast_let_name(node);
 	if (!type_ast_islet(node) || !new_var_name) {
 		global_set_error_critical(ctx);
@@ -3411,25 +3512,60 @@ STATIC int _interpreter_execute_let(struct context* ctx, struct AstNode* node) {
 		return 1;
 	}
 
-	if (interpreter_run_recursive(ctx, type_ast_let_body(node))) {
-		return 1;
-	}
-
-
-	u32 delete_ret = type_assoca_delete(variables,
-			type_symbol_get_str(new_var_name),
-			type_symbol_get_size(new_var_name));
-	// This can be deleted later
-	if (delete_ret) {
-		DEBUG_ERROR("Deletion from assoca failed");
-	}
+	// Success
+	struct StackFrame* frame = global_istack_get_frame(ctx);
+	frame->state = ISTATE_LET_FUNCTION;
 	return 0;
 }
 
-/** Call function from node. Assume that stack is already prepared
+
+/** Process let block.
+ *  Create space for local variable and set its value.
  */
-INLINE int _interpreter_exec_func(struct context* ctx, struct AstNode* node) {
-	builtin_concat(ctx);
+STATIC int _interpreter_execute_let(struct context* ctx) {
+	struct StackFrame* frame = global_istack_get_frame(ctx);
+	struct AstNode* node = frame->node;
+	if (!frame) {
+		 // error
+	}
+
+	switch (frame->state) {
+		case ISTATE_ANY_INIT:
+			frame->state = ISTATE_LET_VARIABLES;
+			return 0;
+		case ISTATE_LET_VARIABLES:
+			return _interpreter_execute_let_vars(ctx, node);
+		case ISTATE_LET_FUNCTION:
+			return _interpreter_execute_let_function(ctx, node);
+		case ISTATE_LET_EXIT:
+			return _interpreter_execute_let_pop(ctx, node);
+		default:
+			global_set_error_interpreter_stack_corruption(ctx);
+			return 1;
+	}
+}
+
+
+/** Execute function that is pointed to by stack.
+ *  Assumes that on top of stack indeed is function frame
+ */
+INLINE int _interpreter_execute_func(struct context* ctx) {
+	struct StackFrame* frame = global_istack_get_frame(ctx);
+	struct AstNode* node = frame->node;
+	switch (frame->state) {
+		case ISTATE_ANY_INIT:
+			frame->state = ISTATE_FUNC_EXEC;
+			break;
+		case ISTATE_FUNC_EXEC:
+			frame->state = ISTATE_FUNC_POP;
+			break;
+		case ISTATE_FUNC_POP:
+			global_istack_pop(ctx);
+			break;
+		default:
+			global_set_error_interpreter_stack_corruption(ctx);
+			return 1;
+	}
 	return 0;
 }
 
@@ -3497,7 +3633,7 @@ INLINE int _interpreter_prepare_func(struct context* ctx, struct AstNode* node) 
 	}
 
 	// Call actual function
-	if (_interpreter_exec_func(ctx, node)) { // Something went wrong
+	if (_interpreter_execute_func(ctx)) { // Something went wrong
 		// Global error is set inside _interpreter_exec_func
 		return 1;
 	}
@@ -3634,6 +3770,50 @@ void interpreter_return_value(struct context* ctx, struct ExpressionT* expr) {
 	}
 }
 
+/** Execute program non recursive version
+ */
+STATIC int interpreter_run(struct context* ctx) {
+	int ret = 0;
+	u64 initial_istack_size = ctx->interpreter_stack_size; // Most likely 0
+
+	// Push first frame
+	if (!global_istack_push(ctx)) {
+		global_set_error_interpreter_stack(ctx);
+		ret = 1;
+		return ret;
+	}
+
+	struct StackFrame* frame = global_istack_get_frame(ctx);
+	// Setup stack frame with first instruction
+	frame->node = ctx->program_ast;
+	frame->state = ISTATE_ANY_INIT;
+
+loop:
+	if (!frame) {
+		global_set_error_interpreter_stack_corruption(ctx);
+		ret = 1;
+		return ret;
+	}
+
+
+	if (type_ast_islet(frame->node)) {
+		ret = _interpreter_execute_let(ctx);
+	} else if (type_ast_isfunc(frame->node)) {
+		ret = _interpreter_execute_func(ctx);
+	} else {
+		global_set_error_interpreter_stack_corruption(ctx);
+		ret = 1;
+	}
+
+
+	if (ret == 0 && ctx->interpreter_stack_size > initial_istack_size) {
+		frame = global_istack_get_frame(ctx);
+		goto loop;
+	}
+	return ret;
+
+}
+
 /** Execute node and move stack pointer one field up. In that space will be
  *  return value of this node.
  *
@@ -3650,9 +3830,7 @@ STATIC int interpreter_run_recursive(struct context* ctx, struct AstNode* node) 
 		ret = _interpreter_execute_if(ctx, node);
 	} else if (type_ast_isval(node)) {
 		ret = _interpreter_execute_val(ctx, node);
-	} else if (type_ast_islet(node)) {
-		ret = _interpreter_execute_let(ctx, node);
-	}
+	} 
 
 	if (ret && !global_is_error(ctx)) {
 		global_set_error_interpreter_general(ctx);
@@ -3733,7 +3911,8 @@ int interpreter_execute(struct context* ctx) {
 	if (interpreter_init_local_vars(ctx)) {
 		return 1;
 	}
-	interpreter_run_recursive(ctx, ctx->program_ast);
+	//interpreter_run_recursive(ctx, ctx->program_ast);
+	interpreter_run(ctx);
 
 	return 0;
 }
@@ -3759,9 +3938,16 @@ i64 runtime_get_file_size(const char* filename) {
 	return sys_stat_stat_get_size(buffer);
 }
 
+
 void runtime_panic() {
 	DEBUG_ERROR("panic");
 	sys_exit(1);
+}
+
+void runtime_assert(int truth, int lineno) {
+	if (!truth) {
+		runtime_panic();
+	}
 }
 
 /** Get the length of linked list.
@@ -4282,18 +4468,10 @@ void repl_print_error(struct context* ctx) {
 	}
 }
 
-void repl_main() {
+void repl_main(const char* filename) {
 	struct context ctx;
 	init_context(&ctx);
-	c_printf0(REPL_HEADLINE);
-
-	u32 argc = platform_get_argc();
-	if (argc != 2) { // Real repl mode is not implemented
-		c_printf0(REPL_HELP);
-		goto error;
-	}
-	char* argv = platform_get_argv(1);
-	i64 script_size = runtime_get_file_size(argv);
+	i64 script_size = runtime_get_file_size(filename);
 	if (script_size < 0) {
 		c_printf0(REPL_FILE_ERROR);
 		goto error;
@@ -4301,7 +4479,7 @@ void repl_main() {
 
 	{
 		char content[script_size];
-		i64 result = runtime_read_file(argv, content, script_size);
+		i64 result = runtime_read_file(filename, content, script_size);
 		if (result < 0) {
 			c_printf0(REPL_FILE_ERROR);
 			goto error;
@@ -4336,15 +4514,27 @@ error:
 }
 
 #if RASBI_STDLIB == 0
-void _start()
-#else
-int main()
-#endif
+int _start()
 {
-#ifdef TEST
-	run_tests();
+	char** argv = NULL;
+	int argc = 0;
+#else
+int main(int argc, char** argv)
+{
 #endif
-	repl_main();
+#ifdef TEST
+	//run_tests();
+#endif
+	c_printf0(REPL_HEADLINE);
+
+	argc = platform_get_argc(argc);
+	if (argc != 2) {
+		c_printf0(REPL_HELP);
+		sys_exit(1);
+		return 1;
+	}
+	char* filename = platform_get_argv(argv, 1);
+	repl_main(filename);
 }
 
 // ============================

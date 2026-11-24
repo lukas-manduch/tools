@@ -133,7 +133,7 @@ void* _platform_stack_bot() {
 /** Get argc from bottom of the stack.
  * This will only work, if compiled program uses ebp
  */
-u64 platform_get_argc() {
+u64 platform_get_argc(int) {
 	u64* stack_bot = _platform_stack_bot();
 	stack_bot++;
 	return *stack_bot;
@@ -142,7 +142,7 @@ u64 platform_get_argc() {
 /** Get arg[index] from bottom of the stack.
  * This will only work, if compiled program uses ebp
  */
-char* platform_get_argv(u32 index) {
+char* platform_get_argv(char**, u32 index) {
 	u64* stack_bot = _platform_stack_bot();
 	stack_bot++;
 	stack_bot++;

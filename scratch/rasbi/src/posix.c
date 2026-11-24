@@ -56,31 +56,15 @@ i64 sys_close(u32 fd) {
 	return ret;
 }
 
-/** Return pointer to 0 in stack, that is pushed before entry point call.
- * This climbs down base pointers, so this must be turned on.
+
+/** Get argc if stdlib is used
  */
-void* _platform_stack_bot() {
-	u64* ret = 0;
-	return ret;
+u64 platform_get_argc(int argc) {
+	return argc;
 }
 
-/** Get argc from bottom of the stack.
- * This will only work, if compiled program uses ebp
+/** Get argv[index] if stdlib is used
  */
-u64 platform_get_argc() {
-	u64* stack_bot = _platform_stack_bot();
-	stack_bot++;
-	return *stack_bot;
-}
-
-/** Get arg[index] from bottom of the stack.
- * This will only work, if compiled program uses ebp
- */
-char* platform_get_argv(u32 index) {
-	u64* stack_bot = _platform_stack_bot();
-	stack_bot++;
-	stack_bot++;
-	while (index--)
-		stack_bot++;
-	return (char*)(*stack_bot);
+char* platform_get_argv(char** argv, u32 index) {
+	return argv[index];
 }
